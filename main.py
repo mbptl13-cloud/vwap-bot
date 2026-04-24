@@ -1,3 +1,5 @@
+# FULL FINAL CODE
+
 import os
 import asyncio
 import requests
@@ -14,13 +16,13 @@ from telegram.ext import (
 )
 
 # =========================================
-# TELEGRAM BOT TOKEN
+# BOT TOKEN
 # =========================================
 
 BOT_TOKEN = "8578450014:AAHQ_Eu9C-XIxRXD1760WL_1UQtVP4dbQW4"
 
-# Optional testing token
-# BOT_TOKEN = "PASTE_YOUR_TELEGRAM_BOT_TOKEN"
+# Optional manual token
+# BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
 
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN missing")
@@ -31,11 +33,6 @@ if not BOT_TOKEN:
 # =========================================
 
 def safe_float(value):
-    """
-    Fix for:
-    The truth value of a Series is ambiguous
-    """
-
     try:
         if hasattr(value, "iloc"):
             return float(value.iloc[0])
@@ -45,14 +42,10 @@ def safe_float(value):
 
 
 # =========================================
-# AUTO FETCH ALL NIFTY F&O STOCKS
+# GET NIFTY F&O STOCKS
 # =========================================
 
 def get_fno_stocks():
-    """
-    Auto fetch NSE F&O stocks for LIVE mode
-    """
-
     try:
         url = "https://www.nseindia.com/api/equity-stockIndices?index=SECURITIES%20IN%20F%26O"
 
@@ -63,7 +56,6 @@ def get_fno_stocks():
 
         session = requests.Session()
 
-        # Required for NSE access
         session.get(
             "https://www.nseindia.com",
             headers=headers,
@@ -90,7 +82,6 @@ def get_fno_stocks():
     except Exception as e:
         print("F&O Fetch Error:", e)
 
-        # Fallback list
         return [
             "RELIANCE.NS",
             "HDFCBANK.NS",
@@ -109,7 +100,7 @@ WATCHLIST = get_fno_stocks()
 
 
 # =========================================
-# VWAP CALCULATION
+# VWAP CALCULATION (5m)
 # =========================================
 
 def calculate_vwap(df):
@@ -127,31 +118,12 @@ def calculate_vwap(df):
 # =========================================
 
 def find_trade(stock, date):
-    """
-    FINAL STRATEGY
-
-    STEP 1:
-    Strong 15m bullish trigger after 9:30
-
-    STEP 2:
-    5m VWAP pullback + close above VWAP
-
-    STEP 3:
-    Breakout above previous candle
-
-    STEP 4:
-    Entry only between 9:45 and 1:30
-
-    STEP 5:
-    One trade per stock per day
-    """
-
     try:
         start = date
         end = pd.to_datetime(date) + pd.Timedelta(days=1)
 
         # ---------------------------------
-        # Download 15m Data
+        # DOWNLOAD DATA
         # ---------------------------------
 
         df15 = yf.download(
@@ -162,10 +134,6 @@ def find_trade(stock, date):
             progress=False,
             auto_adjust=True
         )
-
-        # ---------------------------------
-        # Download 5m Data
-        # ---------------------------------
 
         df5 = yf.download(
             stock,
@@ -180,7 +148,7 @@ def find_trade(stock, date):
             return None
 
         # ---------------------------------
-        # Convert to IST
+        # TIMEZONE FIX
         # ---------------------------------
 
         if df15.index.tz is not None:
@@ -199,77 +167,104 @@ def find_trade(stock, date):
 
         df5 = calculate_vwap(df5)
 
-        # =====================================
-        # STEP 1 → STRONG VALID 15m SIGNALS
-        # =====================================
+        # =========================================
+        # STEP 1 → STRONG 15m FILTER
+        # =========================================
 
         valid_15m_signals = []
-        avg_15m_volume = safe_float(df15["Volume"].mean())
+
+        avg_15m_volume = safe_float(
+            df15["Volume"].rolling(20).mean().iloc[-1]
+        )
 
         for idx, row in df15.iterrows():
 
             # Ignore before 9:30
+
             if idx.time() <= pd.to_datetime("09:30").time():
                 continue
 
             open_price = safe_float(row["Open"])
-            close_price = safe_float(row["Close"])
             high_price = safe_float(row["High"])
             low_price = safe_float(row["Low"])
+            close_price = safe_float(row["Close"])
             volume = safe_float(row["Volume"])
 
             if None in [
                 open_price,
-                close_price,
                 high_price,
                 low_price,
+                close_price,
                 volume
             ]:
                 continue
 
-            # ---------------------------------
-            # Candle Structure Quality Check
-            # ---------------------------------
+            if open_price <= 0:
+                continue
 
             candle_range = high_price - low_price
-            body_size = close_price - open_price
+            body_size = abs(close_price - open_price)
             upper_wick = high_price - close_price
 
             if candle_range <= 0:
                 continue
 
-            # Rule 1 → Bullish Candle
-            bullish = close_price > open_price
+            # Condition 1
+            cond_volume = volume > 500000
 
-            # Rule 2 → Strong Body
-            strong_body = body_size >= (
-                candle_range * 0.5
+            # Condition 2
+            cond_money_flow = (
+                close_price * volume
+            ) > 150000000
+
+            # Condition 3
+            range_percent = (
+                (high_price - low_price)
+                / open_price
+            ) * 100
+
+            cond_range = range_percent > 1
+
+            # Condition 4
+            body_percent = (
+                body_size / open_price
+            ) * 100
+
+            cond_body = body_percent > 0.6
+
+            # Condition 5
+            cond_close_above_open = (
+                close_price > open_price
             )
 
-            # Rule 3 → Close Near High
-            close_near_high = upper_wick <= (
-                candle_range * 0.3
+            # Condition 6
+            cond_relative_volume = (
+                avg_15m_volume is not None
+                and volume > (avg_15m_volume * 2)
             )
 
-            # Rule 4 → Strong Volume
-            strong_volume = volume > avg_15m_volume
-
-            # Final strict confirmation
+            # NEW → Close Near High
+            close_near_high = (
+                (upper_wick / candle_range) < 0.3
+            )
 
             if (
-                bullish
-                and strong_body
+                cond_volume
+                and cond_money_flow
+                and cond_range
+                and cond_body
+                and cond_close_above_open
+                and cond_relative_volume
                 and close_near_high
-                and strong_volume
             ):
                 valid_15m_signals.append(idx)
 
         if not valid_15m_signals:
             return None
 
-        # =====================================
+        # =========================================
         # STEP 2 → 5m ENTRY LOGIC
-        # =====================================
+        # =========================================
 
         for i in range(2, len(df5)):
 
@@ -302,8 +297,8 @@ def find_trade(stock, date):
                 continue
 
             # ---------------------------------
-            # Find latest 15m trigger
-            # within 60 minutes
+            # Find latest valid 15m trigger
+            # within 60 min
             # ---------------------------------
 
             latest_trigger = None
@@ -467,15 +462,10 @@ def live_scan():
 # TELEGRAM HANDLER
 # =========================================
 
-async def handle_message(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
 
-    # =====================================
     # LIVE MODE
-    # =====================================
 
     if text.upper() == "LIVE":
         await update.message.reply_text(
@@ -490,7 +480,7 @@ async def handle_message(
             )
             return
 
-        msg = "🔥 LIVE F&O SIGNALS\n\n"
+        msg = "🔥 LIVE SIGNALS\n\n"
 
         for r in results:
             msg += (
@@ -506,14 +496,9 @@ async def handle_message(
         await update.message.reply_text(msg)
         return
 
-    # =====================================
     # RANGE MODE
-    # Example:
-    # ADANIGREEN 2026-04-01 to 2026-04-20
-    # =====================================
 
     if " to " in text.lower():
-
         try:
             left, end_date = text.lower().split(" to ")
             parts = left.split()
@@ -523,8 +508,7 @@ async def handle_message(
             end_date = end_date.strip()
 
             await update.message.reply_text(
-                f"Scanning range for {stock}\n"
-                f"{start_date} to {end_date}"
+                f"Scanning {stock}\n{start_date} to {end_date}"
             )
 
             results = range_scan(
@@ -535,7 +519,7 @@ async def handle_message(
 
             if not results:
                 await update.message.reply_text(
-                    "❌ No trades found in range"
+                    "❌ No trades found"
                 )
                 return
 
@@ -556,16 +540,11 @@ async def handle_message(
 
         except:
             await update.message.reply_text(
-                "Use format:\n"
-                "ADANIGREEN 2026-04-01 to 2026-04-20"
+                "Format:\nADANIGREEN 2026-04-01 to 2026-04-20"
             )
             return
 
-    # =====================================
     # SINGLE DATE MODE
-    # Example:
-    # BHEL 2026-04-16
-    # =====================================
 
     parts = text.split()
 
@@ -574,14 +553,14 @@ async def handle_message(
         date = parts[1]
 
         await update.message.reply_text(
-            f"Checking {stock} on {date}..."
+            f"Checking {stock} on {date}"
         )
 
         result = find_trade(stock, date)
 
         if result is None:
             await update.message.reply_text(
-                f"❌ No trade found for {stock}"
+                "❌ No trade found"
             )
             return
 
@@ -590,9 +569,10 @@ async def handle_message(
             return
 
         msg = (
-            f"🔥 TRADE FOUND - {result['stock']}\n\n"
+            f"🔥 TRADE FOUND\n\n"
+            f"Stock: {result['stock']}\n"
             f"15m Trigger: {result['trigger']}\n"
-            f"5m Entry: {result['entry_time']}\n\n"
+            f"5m Entry: {result['entry_time']}\n"
             f"Entry: {result['entry']}\n"
             f"SL: {result['sl']}\n"
             f"Target: {result['target']}\n"
@@ -602,9 +582,7 @@ async def handle_message(
         await update.message.reply_text(msg)
         return
 
-    # =====================================
-    # HELP MENU
-    # =====================================
+    # HELP
 
     await update.message.reply_text(
         "Commands:\n\n"
@@ -612,7 +590,7 @@ async def handle_message(
         "BHEL 2026-04-16\n\n"
         "2. Date Range:\n"
         "ADANIGREEN 2026-04-01 to 2026-04-20\n\n"
-        "3. Live Full F&O Scan:\n"
+        "3. Live Scan:\n"
         "LIVE"
     )
 
@@ -624,9 +602,7 @@ async def handle_message(
 async def main():
     print("BOT RUNNING...")
 
-    app = ApplicationBuilder().token(
-        BOT_TOKEN
-    ).build()
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(
         MessageHandler(
