@@ -212,7 +212,7 @@ def find_trade(stock, date):
 
         for idx, row in df15.iterrows():
 
-            if idx.time() <= pd.to_datetime("09:30").time():
+            if idx.time() <= pd.to_datetime("09:45").time():
                 continue
 
             open_p = safe_float(row["Open"])
