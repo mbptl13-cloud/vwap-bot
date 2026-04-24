@@ -1,5 +1,3 @@
-# FULL FINAL CODE
-
 import os
 import asyncio
 import requests
@@ -21,7 +19,7 @@ from telegram.ext import (
 
 BOT_TOKEN = "8578450014:AAHQ_Eu9C-XIxRXD1760WL_1UQtVP4dbQW4"
 
-# Optional manual token
+# Optional:
 # BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
 
 if not BOT_TOKEN:
@@ -29,7 +27,7 @@ if not BOT_TOKEN:
 
 
 # =========================================
-# SAFE FLOAT FIX
+# SAFE FLOAT
 # =========================================
 
 def safe_float(value):
@@ -42,7 +40,7 @@ def safe_float(value):
 
 
 # =========================================
-# GET NIFTY F&O STOCKS
+# GET F&O STOCKS
 # =========================================
 
 def get_fno_stocks():
@@ -76,7 +74,6 @@ def get_fno_stocks():
             stocks.append(item["symbol"] + ".NS")
 
         print(f"F&O Loaded: {len(stocks)}")
-
         return stocks
 
     except Exception as e:
@@ -100,7 +97,7 @@ WATCHLIST = get_fno_stocks()
 
 
 # =========================================
-# VWAP CALCULATION (5m)
+# VWAP
 # =========================================
 
 def calculate_vwap(df):
@@ -121,10 +118,6 @@ def find_trade(stock, date):
     try:
         start = date
         end = pd.to_datetime(date) + pd.Timedelta(days=1)
-
-        # ---------------------------------
-        # DOWNLOAD DATA
-        # ---------------------------------
 
         df15 = yf.download(
             stock,
@@ -147,10 +140,6 @@ def find_trade(stock, date):
         if len(df15) < 5 or len(df5) < 10:
             return None
 
-        # ---------------------------------
-        # TIMEZONE FIX
-        # ---------------------------------
-
         if df15.index.tz is not None:
             df15.index = df15.index.tz_convert(
                 "Asia/Kolkata"
@@ -161,15 +150,11 @@ def find_trade(stock, date):
                 "Asia/Kolkata"
             ).tz_localize(None)
 
-        # ---------------------------------
-        # VWAP
-        # ---------------------------------
-
         df5 = calculate_vwap(df5)
 
-        # =========================================
-        # STEP 1 → STRONG 15m FILTER
-        # =========================================
+        # =====================================
+        # 15m FILTER
+        # =====================================
 
         valid_15m_signals = []
 
@@ -178,8 +163,6 @@ def find_trade(stock, date):
         )
 
         for idx, row in df15.iterrows():
-
-            # Ignore before 9:30
 
             if idx.time() <= pd.to_datetime("09:30").time():
                 continue
@@ -243,7 +226,7 @@ def find_trade(stock, date):
                 and volume > (avg_15m_volume * 2)
             )
 
-            # NEW → Close Near High
+            # Condition 7
             close_near_high = (
                 (upper_wick / candle_range) < 0.3
             )
@@ -262,15 +245,13 @@ def find_trade(stock, date):
         if not valid_15m_signals:
             return None
 
-        # =========================================
-        # STEP 2 → 5m ENTRY LOGIC
-        # =========================================
+        # =====================================
+        # 5m ENTRY
+        # =====================================
 
         for i in range(2, len(df5)):
 
             current_time = df5.index[i]
-
-            # Entry window
 
             if current_time.time() < pd.to_datetime("09:45").time():
                 continue
@@ -296,11 +277,6 @@ def find_trade(stock, date):
             ]:
                 continue
 
-            # ---------------------------------
-            # Find latest valid 15m trigger
-            # within 60 min
-            # ---------------------------------
-
             latest_trigger = None
 
             for trigger in valid_15m_signals:
@@ -313,15 +289,10 @@ def find_trade(stock, date):
             if latest_trigger is None:
                 continue
 
-            # No same candle entry
-
             if current_time <= latest_trigger:
                 continue
 
-            # ---------------------------------
-            # VWAP Pullback
-            # ---------------------------------
-
+            # VWAP pullback
             touched_vwap = (
                 low_price <= vwap_price * 1.002
             )
@@ -336,10 +307,7 @@ def find_trade(stock, date):
             ):
                 continue
 
-            # ---------------------------------
-            # Breakout Confirmation
-            # ---------------------------------
-
+            # Breakout
             breakout = close_price > prev_high
             bullish_5m = close_price > open_price
 
@@ -349,10 +317,7 @@ def find_trade(stock, date):
             ):
                 continue
 
-            # ---------------------------------
-            # Entry / SL / Target
-            # ---------------------------------
-
+            # Entry
             entry = round(close_price, 2)
             sl = round(vwap_price, 2)
 
@@ -360,8 +325,6 @@ def find_trade(stock, date):
 
             if risk <= 0:
                 continue
-
-            # Minimum SL Filter
 
             if risk < (entry * 0.003):
                 continue
@@ -371,22 +334,13 @@ def find_trade(stock, date):
                 2
             )
 
-            # ---------------------------------
-            # Result Check
-            # ---------------------------------
-
             result = "OPEN"
 
             for j in range(i + 1, len(df5)):
                 future = df5.iloc[j]
 
-                future_low = safe_float(
-                    future["Low"]
-                )
-
-                future_high = safe_float(
-                    future["High"]
-                )
+                future_low = safe_float(future["Low"])
+                future_high = safe_float(future["High"])
 
                 if (
                     future_low is None
@@ -442,15 +396,14 @@ def range_scan(stock, start_date, end_date):
 
 
 # =========================================
-# LIVE SCAN
+# DATE SCAN (ALL STOCKS)
 # =========================================
 
-def live_scan():
-    today = datetime.now().strftime("%Y-%m-%d")
+def full_date_scan(date):
     results = []
 
     for stock in WATCHLIST:
-        result = find_trade(stock, today)
+        result = find_trade(stock, date)
 
         if result and not isinstance(result, str):
             results.append(result)
@@ -465,14 +418,17 @@ def live_scan():
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
 
-    # LIVE MODE
+    # =====================================
+    # 1. LIVE
+    # =====================================
 
     if text.upper() == "LIVE":
         await update.message.reply_text(
-            "Scanning LIVE NIFTY F&O opportunities..."
+            "Scanning LIVE F&O stocks..."
         )
 
-        results = live_scan()
+        today = datetime.now().strftime("%Y-%m-%d")
+        results = full_date_scan(today)
 
         if not results:
             await update.message.reply_text(
@@ -480,13 +436,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
-        msg = "🔥 LIVE SIGNALS\n\n"
+        msg = "🔥 LIVE RESULT\n\n"
 
         for r in results:
             msg += (
                 f"{r['stock']}\n"
-                f"15m Trigger: {r['trigger']}\n"
-                f"5m Entry: {r['entry_time']}\n"
+                f"15m: {r['trigger']}\n"
+                f"5m: {r['entry_time']}\n"
                 f"Entry: {r['entry']} | "
                 f"SL: {r['sl']} | "
                 f"Target: {r['target']}\n"
@@ -496,7 +452,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(msg)
         return
 
-    # RANGE MODE
+    # =====================================
+    # 2. STOCK + RANGE
+    # Example:
+    # BHEL 2026-04-01 to 2026-04-20
+    # =====================================
 
     if " to " in text.lower():
         try:
@@ -508,7 +468,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             end_date = end_date.strip()
 
             await update.message.reply_text(
-                f"Scanning {stock}\n{start_date} to {end_date}"
+                f"Scanning {stock}\n"
+                f"{start_date} to {end_date}"
             )
 
             results = range_scan(
@@ -539,59 +500,105 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         except:
-            await update.message.reply_text(
-                "Format:\nADANIGREEN 2026-04-01 to 2026-04-20"
-            )
-            return
+            pass
 
-    # SINGLE DATE MODE
+    # =====================================
+    # 3. STOCK + DATE
+    # Example:
+    # BHEL 2026-04-16
+    # =====================================
 
     parts = text.split()
 
     if len(parts) == 2:
-        stock = parts[0].upper() + ".NS"
-        date = parts[1]
+        try:
+            stock = parts[0].upper() + ".NS"
+            date = parts[1]
 
-        await update.message.reply_text(
-            f"Checking {stock} on {date}"
-        )
-
-        result = find_trade(stock, date)
-
-        if result is None:
             await update.message.reply_text(
-                "❌ No trade found"
+                f"Checking {stock} on {date}"
             )
+
+            result = find_trade(stock, date)
+
+            if result is None:
+                await update.message.reply_text(
+                    "❌ No trade found"
+                )
+                return
+
+            if isinstance(result, str):
+                await update.message.reply_text(result)
+                return
+
+            msg = (
+                f"🔥 TRADE FOUND\n\n"
+                f"Stock: {result['stock']}\n"
+                f"15m: {result['trigger']}\n"
+                f"5m: {result['entry_time']}\n"
+                f"Entry: {result['entry']}\n"
+                f"SL: {result['sl']}\n"
+                f"Target: {result['target']}\n"
+                f"Result: {result['result']}"
+            )
+
+            await update.message.reply_text(msg)
             return
 
-        if isinstance(result, str):
-            await update.message.reply_text(result)
+        except:
+            pass
+
+    # =====================================
+    # 4. DATE ONLY
+    # Example:
+    # 2026-04-16
+    # =====================================
+
+    if len(text) == 10 and text.count("-") == 2:
+        try:
+            date = text
+
+            await update.message.reply_text(
+                f"Scanning full F&O for {date}"
+            )
+
+            results = full_date_scan(date)
+
+            if not results:
+                await update.message.reply_text(
+                    "❌ No trades found"
+                )
+                return
+
+            msg = f"🔥 DATE RESULT - {date}\n\n"
+
+            for r in results:
+                msg += (
+                    f"{r['stock']}\n"
+                    f"15m: {r['trigger']}\n"
+                    f"5m: {r['entry_time']}\n"
+                    f"Entry: {r['entry']} | "
+                    f"SL: {r['sl']} | "
+                    f"Target: {r['target']}\n"
+                    f"Result: {r['result']}\n\n"
+                )
+
+            await update.message.reply_text(msg)
             return
 
-        msg = (
-            f"🔥 TRADE FOUND\n\n"
-            f"Stock: {result['stock']}\n"
-            f"15m Trigger: {result['trigger']}\n"
-            f"5m Entry: {result['entry_time']}\n"
-            f"Entry: {result['entry']}\n"
-            f"SL: {result['sl']}\n"
-            f"Target: {result['target']}\n"
-            f"Result: {result['result']}"
-        )
+        except:
+            pass
 
-        await update.message.reply_text(msg)
-        return
-
+    # =====================================
     # HELP
+    # =====================================
 
     await update.message.reply_text(
-        "Commands:\n\n"
-        "1. Single Day:\n"
-        "BHEL 2026-04-16\n\n"
-        "2. Date Range:\n"
-        "ADANIGREEN 2026-04-01 to 2026-04-20\n\n"
-        "3. Live Scan:\n"
-        "LIVE"
+        "Use 4 formats:\n\n"
+        "1. LIVE\n\n"
+        "2. 2026-04-16\n\n"
+        "3. BHEL 2026-04-16\n\n"
+        "4. BHEL 2026-04-01 to 2026-04-20"
     )
 
 
@@ -602,7 +609,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def main():
     print("BOT RUNNING...")
 
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app = ApplicationBuilder().token(
+        BOT_TOKEN
+    ).build()
 
     app.add_handler(
         MessageHandler(
