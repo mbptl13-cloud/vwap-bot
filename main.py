@@ -19,7 +19,7 @@ from telegram.ext import (
 
 BOT_TOKEN = "8578450014:AAHQ_Eu9C-XIxRXD1760WL_1UQtVP4dbQW4"
 
-# Optional direct token testing
+# Optional testing token
 # BOT_TOKEN = "PASTE_YOUR_TELEGRAM_BOT_TOKEN"
 
 if not BOT_TOKEN:
@@ -63,6 +63,7 @@ def get_fno_stocks():
 
         session = requests.Session()
 
+        # Required for NSE access
         session.get(
             "https://www.nseindia.com",
             headers=headers,
@@ -127,15 +128,22 @@ def calculate_vwap(df):
 
 def find_trade(stock, date):
     """
-    Strategy:
+    FINAL STRATEGY
 
-    1. 15m bullish candle after 9:30
-    2. Strong volume confirmation
-    3. 5m pullback near VWAP
-    4. Close above VWAP
-    5. Breakout above previous candle
-    6. Entry only between 9:45 to 1:30
-    7. One trade per stock per day
+    STEP 1:
+    Strong 15m bullish trigger after 9:30
+
+    STEP 2:
+    5m VWAP pullback + close above VWAP
+
+    STEP 3:
+    Breakout above previous candle
+
+    STEP 4:
+    Entry only between 9:45 and 1:30
+
+    STEP 5:
+    One trade per stock per day
     """
 
     try:
@@ -143,7 +151,7 @@ def find_trade(stock, date):
         end = pd.to_datetime(date) + pd.Timedelta(days=1)
 
         # ---------------------------------
-        # Download 15m
+        # Download 15m Data
         # ---------------------------------
 
         df15 = yf.download(
@@ -156,7 +164,7 @@ def find_trade(stock, date):
         )
 
         # ---------------------------------
-        # Download 5m
+        # Download 5m Data
         # ---------------------------------
 
         df5 = yf.download(
@@ -172,14 +180,18 @@ def find_trade(stock, date):
             return None
 
         # ---------------------------------
-        # Convert timezone to IST
+        # Convert to IST
         # ---------------------------------
 
         if df15.index.tz is not None:
-            df15.index = df15.index.tz_convert("Asia/Kolkata").tz_localize(None)
+            df15.index = df15.index.tz_convert(
+                "Asia/Kolkata"
+            ).tz_localize(None)
 
         if df5.index.tz is not None:
-            df5.index = df5.index.tz_convert("Asia/Kolkata").tz_localize(None)
+            df5.index = df5.index.tz_convert(
+                "Asia/Kolkata"
+            ).tz_localize(None)
 
         # ---------------------------------
         # VWAP
@@ -188,7 +200,7 @@ def find_trade(stock, date):
         df5 = calculate_vwap(df5)
 
         # =====================================
-        # STEP 1 → VALID 15m SIGNALS
+        # STEP 1 → STRONG VALID 15m SIGNALS
         # =====================================
 
         valid_15m_signals = []
@@ -196,20 +208,60 @@ def find_trade(stock, date):
 
         for idx, row in df15.iterrows():
 
+            # Ignore before 9:30
             if idx.time() <= pd.to_datetime("09:30").time():
                 continue
 
             open_price = safe_float(row["Open"])
             close_price = safe_float(row["Close"])
+            high_price = safe_float(row["High"])
+            low_price = safe_float(row["Low"])
             volume = safe_float(row["Volume"])
 
-            if None in [open_price, close_price, volume]:
+            if None in [
+                open_price,
+                close_price,
+                high_price,
+                low_price,
+                volume
+            ]:
                 continue
 
+            # ---------------------------------
+            # Candle Structure Quality Check
+            # ---------------------------------
+
+            candle_range = high_price - low_price
+            body_size = close_price - open_price
+            upper_wick = high_price - close_price
+
+            if candle_range <= 0:
+                continue
+
+            # Rule 1 → Bullish Candle
             bullish = close_price > open_price
+
+            # Rule 2 → Strong Body
+            strong_body = body_size >= (
+                candle_range * 0.5
+            )
+
+            # Rule 3 → Close Near High
+            close_near_high = upper_wick <= (
+                candle_range * 0.3
+            )
+
+            # Rule 4 → Strong Volume
             strong_volume = volume > avg_15m_volume
 
-            if bullish and strong_volume:
+            # Final strict confirmation
+
+            if (
+                bullish
+                and strong_body
+                and close_near_high
+                and strong_volume
+            ):
                 valid_15m_signals.append(idx)
 
         if not valid_15m_signals:
@@ -250,7 +302,8 @@ def find_trade(stock, date):
                 continue
 
             # ---------------------------------
-            # Find latest trigger
+            # Find latest 15m trigger
+            # within 60 minutes
             # ---------------------------------
 
             latest_trigger = None
@@ -274,20 +327,31 @@ def find_trade(stock, date):
             # VWAP Pullback
             # ---------------------------------
 
-            touched_vwap = low_price <= vwap_price * 1.002
-            closed_above_vwap = close_price > vwap_price
+            touched_vwap = (
+                low_price <= vwap_price * 1.002
+            )
 
-            if not (touched_vwap and closed_above_vwap):
+            closed_above_vwap = (
+                close_price > vwap_price
+            )
+
+            if not (
+                touched_vwap
+                and closed_above_vwap
+            ):
                 continue
 
             # ---------------------------------
-            # Breakout
+            # Breakout Confirmation
             # ---------------------------------
 
             breakout = close_price > prev_high
             bullish_5m = close_price > open_price
 
-            if not (breakout and bullish_5m):
+            if not (
+                breakout
+                and bullish_5m
+            ):
                 continue
 
             # ---------------------------------
@@ -302,12 +366,15 @@ def find_trade(stock, date):
             if risk <= 0:
                 continue
 
-            # Minimum SL filter
+            # Minimum SL Filter
 
             if risk < (entry * 0.003):
                 continue
 
-            target = round(entry + (risk * 2), 2)
+            target = round(
+                entry + (risk * 2),
+                2
+            )
 
             # ---------------------------------
             # Result Check
@@ -318,10 +385,18 @@ def find_trade(stock, date):
             for j in range(i + 1, len(df5)):
                 future = df5.iloc[j]
 
-                future_low = safe_float(future["Low"])
-                future_high = safe_float(future["High"])
+                future_low = safe_float(
+                    future["Low"]
+                )
 
-                if future_low is None or future_high is None:
+                future_high = safe_float(
+                    future["High"]
+                )
+
+                if (
+                    future_low is None
+                    or future_high is None
+                ):
                     continue
 
                 if future_low <= sl:
@@ -392,7 +467,10 @@ def live_scan():
 # TELEGRAM HANDLER
 # =========================================
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_message(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
     text = update.message.text.strip()
 
     # =====================================
@@ -525,7 +603,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # =====================================
-    # HELP
+    # HELP MENU
     # =====================================
 
     await update.message.reply_text(
@@ -546,7 +624,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def main():
     print("BOT RUNNING...")
 
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    app = ApplicationBuilder().token(
+        BOT_TOKEN
+    ).build()
 
     app.add_handler(
         MessageHandler(
