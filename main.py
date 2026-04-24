@@ -69,7 +69,7 @@ def get_fno_stocks():
         "ADANIGREEN.NS", "ADANIPOWER.NS", "ATGL.NS",
         "TATASTEEL.NS", "JSWSTEEL.NS",
         "HINDALCO.NS", "VEDL.NS",
-        "TATAMOTORS.NS", "MARUTI.NS", "M&M.NS",
+        "TMPV.NS", "MARUTI.NS", "M&M.NS",
         "SUNPHARMA.NS", "DRREDDY.NS", "CIPLA.NS",
         "ITC.NS", "HINDUNILVR.NS",
         "TRENT.NS", "KAYNES.NS", "POLICYBZR.NS",
