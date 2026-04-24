@@ -251,9 +251,9 @@ def find_trade(stock, date):
             cond5 = close_p > open_p
 
             cond6 = (
-    df['vol_sma_20'].iloc[-1] is not None
-    and vol > 2 * df['vol_sma_20'].iloc[-1]
-)
+            avg_vol is not None
+            and vol > 2 * avg_vol
+            )
 
             cond7 = (
                 (upper_wick / candle_range) < 0.3
