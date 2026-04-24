@@ -1,4 +1,5 @@
 import os
+import asyncio
 import pandas as pd
 import yfinance as yf
 
@@ -11,13 +12,13 @@ from telegram.ext import (
 )
 
 # =========================================
-# TELEGRAM TOKEN
+# TELEGRAM BOT TOKEN
 # =========================================
 
 BOT_TOKEN = os.getenv("8578450014:AAHQ_Eu9C-XIxRXD1760WL_1UQtVP4dbQW4")
 
 if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN not found in Environment Variables")
+    raise ValueError("BOT_TOKEN not found in Render Environment Variables")
 
 
 # =========================================
@@ -35,27 +36,29 @@ def calculate_vwap(df):
 
 
 # =========================================
-# MAIN STRATEGY LOGIC
+# FIND TRADE LOGIC
 # =========================================
 
 def find_trade(stock, date):
     """
     Strategy:
-    1. 15m bullish candle after 9:30 with strong volume
-    2. 5m pullback near VWAP
-    3. Price should not close below VWAP
-    4. Breakout candle confirmation
-    5. Entry only between 9:45 to 1:30
-    6. One trade per stock per day
+    1. 15m bullish candle after 9:30
+    2. Strong volume candle
+    3. 5m pullback near VWAP
+    4. Candle closes above VWAP
+    5. Breakout confirmation
+    6. Entry only between 9:45 and 1:30
+    7. One trade per stock per day
     """
 
     try:
         start = date
         end = pd.to_datetime(date) + pd.Timedelta(days=1)
 
-        # -----------------------------
-        # Download Data
-        # -----------------------------
+        # ---------------------------------
+        # Download 15m data
+        # ---------------------------------
+
         df15 = yf.download(
             stock,
             interval="15m",
@@ -64,6 +67,10 @@ def find_trade(stock, date):
             progress=False,
             auto_adjust=True
         )
+
+        # ---------------------------------
+        # Download 5m data
+        # ---------------------------------
 
         df5 = yf.download(
             stock,
@@ -77,27 +84,28 @@ def find_trade(stock, date):
         if len(df15) < 5 or len(df5) < 10:
             return None
 
-        # -----------------------------
-        # Convert Time to IST
-        # -----------------------------
+        # ---------------------------------
+        # Convert timezone to IST
+        # ---------------------------------
+
         if df15.index.tz is not None:
             df15.index = df15.index.tz_convert("Asia/Kolkata").tz_localize(None)
 
         if df5.index.tz is not None:
             df5.index = df5.index.tz_convert("Asia/Kolkata").tz_localize(None)
 
-        # -----------------------------
-        # VWAP
-        # -----------------------------
+        # ---------------------------------
+        # Calculate VWAP
+        # ---------------------------------
+
         df5 = calculate_vwap(df5)
 
         # =====================================
-        # STEP 1 → FIND VALID 15m TRIGGERS
+        # STEP 1 → VALID 15m SIGNALS
         # =====================================
 
         valid_15m_signals = []
-
-        avg_volume_15m = df15["Volume"].mean()
+        avg_15m_volume = df15["Volume"].mean()
 
         for idx, row in df15.iterrows():
 
@@ -106,7 +114,7 @@ def find_trade(stock, date):
                 continue
 
             bullish = row["Close"] > row["Open"]
-            strong_volume = row["Volume"] > avg_volume_15m
+            strong_volume = row["Volume"] > avg_15m_volume
 
             if bullish and strong_volume:
                 valid_15m_signals.append(idx)
@@ -115,16 +123,15 @@ def find_trade(stock, date):
             return None
 
         # =====================================
-        # STEP 2 → FIND 5m ENTRY
+        # STEP 2 → 5m ENTRY LOGIC
         # =====================================
-
-        used_trigger = None
 
         for i in range(2, len(df5)):
 
             current_time = df5.index[i]
 
-            # Entry time filter
+            # Entry allowed only 9:45 to 1:30
+
             if current_time.time() < pd.to_datetime("09:45").time():
                 continue
 
@@ -135,8 +142,8 @@ def find_trade(stock, date):
             prev = df5.iloc[i - 1]
 
             # ---------------------------------
-            # Find latest valid 15m trigger
-            # within 60 mins
+            # Find latest valid trigger
+            # within last 60 mins
             # ---------------------------------
 
             latest_trigger = None
@@ -152,6 +159,7 @@ def find_trade(stock, date):
                 continue
 
             # No same candle entry
+
             if current_time <= latest_trigger:
                 continue
 
@@ -166,7 +174,7 @@ def find_trade(stock, date):
                 continue
 
             # ---------------------------------
-            # Breakout Confirmation
+            # Breakout confirmation
             # ---------------------------------
 
             breakout = row["Close"] > prev["High"]
@@ -182,8 +190,9 @@ def find_trade(stock, date):
             entry = round(float(row["Close"]), 2)
             sl = round(float(row["VWAP"]), 2)
 
-            # Minimum SL filter
             risk = entry - sl
+
+            # Minimum SL filter
 
             if risk <= 0:
                 continue
@@ -194,7 +203,7 @@ def find_trade(stock, date):
             target = round(entry + (risk * 2), 2)
 
             # ---------------------------------
-            # Result Check
+            # Result check
             # ---------------------------------
 
             result = "OPEN"
@@ -210,12 +219,10 @@ def find_trade(stock, date):
                     result = "WIN"
                     break
 
-            used_trigger = latest_trigger
-
             return {
                 "stock": stock,
                 "all_15m_signals": [str(x) for x in valid_15m_signals],
-                "used_trigger": str(used_trigger),
+                "used_trigger": str(latest_trigger),
                 "entry_time": str(current_time),
                 "entry": entry,
                 "sl": sl,
@@ -236,14 +243,17 @@ def find_trade(stock, date):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
 
-    # Format:
+    # Example:
     # BHEL 2026-04-16
 
     parts = text.split()
 
     if len(parts) != 2:
         await update.message.reply_text(
-            "Use format:\n\nSTOCKNAME YYYY-MM-DD\n\nExample:\nBHEL 2026-04-16"
+            "Use format:\n\n"
+            "STOCKNAME YYYY-MM-DD\n\n"
+            "Example:\n"
+            "BHEL 2026-04-16"
         )
         return
 
@@ -295,10 +305,10 @@ Result:
 
 
 # =========================================
-# START BOT
+# START BOT (PYTHON 3.14 FIX)
 # =========================================
 
-def main():
+async def main():
     print("BOT RUNNING...")
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
@@ -310,8 +320,14 @@ def main():
         )
     )
 
-    app.run_polling()
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling()
+
+    # Keep running forever
+    while True:
+        await asyncio.sleep(3600)
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
