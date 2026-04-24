@@ -201,73 +201,105 @@ def find_trade(stock, date):
         df5 = calculate_vwap(df5)
 
         # =========================================
-        # STEP 1 → 15m FILTER (PASS / FAIL)
-        # =========================================
+# STEP 1 → 15m FILTER (PASS / FAIL) - FIXED
+# =========================================
 
-        valid_15m = []
+valid_15m = []
 
-        avg_vol = safe_float(
-            df15["Volume"].rolling(20).mean().iloc[-1]
-        )
+# previous day close (SAFE VERSION)
+df_daily = yf.download(
+    stock,
+    interval="1d",
+    period="5d",
+    progress=False
+)
 
-        for idx, row in df15.iterrows():
+if len(df_daily) < 2:
+    return None
 
-            if idx.time() <= pd.to_datetime("09:45").time():
-                continue
+prev_close = df_daily["Close"].iloc[-2]
 
-            open_p = safe_float(row["Open"])
-            high_p = safe_float(row["High"])
-            low_p = safe_float(row["Low"])
-            close_p = safe_float(row["Close"])
-            vol = safe_float(row["Volume"])
+# 15m avg volume SMA
+vol_sma_20 = df15["Volume"].rolling(20).mean()
 
-            if None in [
-                open_p, high_p,
-                low_p, close_p, vol
-            ]:
-                continue
+for idx, row in df15.iterrows():
 
-            candle_range = high_p - low_p
-            body = abs(close_p - open_p)
-            upper_wick = high_p - close_p
+    if idx.time() <= pd.to_datetime("09:30").time():
+        continue
 
-            if candle_range <= 0:
-                continue
+    open_p = safe_float(row["Open"])
+    high_p = safe_float(row["High"])
+    low_p = safe_float(row["Low"])
+    close_p = safe_float(row["Close"])
+    vol = safe_float(row["Volume"])
 
-            cond1 = vol > 500000
-            cond2 = (close_p * vol) > 150000000
+    if None in [open_p, high_p, low_p, close_p, vol]:
+        continue
 
-            range_percent = (
-                (high_p - low_p) / open_p
-            ) * 100
+    candle_range = high_p - low_p
+    body = abs(close_p - open_p)
+    upper_wick = high_p - close_p
 
-            cond3 = range_percent > 1
+    if candle_range <= 0:
+        continue
 
-            body_percent = (
-                body / open_p
-            ) * 100
+    # ===============================
+    # BASIC CONDITIONS
+    # ===============================
 
-            cond4 = body_percent > 0.6
-            cond5 = close_p > open_p
+    cond1 = vol > 200000  # relaxed (IMPORTANT FIX)
+    cond2 = True          # removed strict turnover filter (IMPORTANT FIX)
 
-            cond6 = (
-            avg_vol is not None
-            and vol > 2 * avg_vol
-            )
+    range_percent = (high_p - low_p) / open_p * 100
+    cond3 = range_percent > 0.4  # relaxed
 
-            cond7 = (
-                (upper_wick / candle_range) < 0.3
-            )
+    body_percent = (body / open_p) * 100
+    cond4 = body_percent > 0.4   # relaxed
 
-            if (
-                cond1 and cond2 and cond3
-                and cond4 and cond5
-                and cond6 and cond7
-            ):
-                valid_15m.append(idx)
+    cond5 = close_p > open_p
 
-        if not valid_15m:
-            return None
+    # ===============================
+    # VOLUME SPIKE (FIXED VERSION)
+    # ===============================
+
+    avg_vol = safe_float(vol_sma_20.iloc[df15.index.get_loc(idx)])
+
+    cond6 = (
+        avg_vol is not None
+        and vol > 1.5 * avg_vol
+    )
+
+    # ===============================
+    # WICK QUALITY
+    # ===============================
+
+    cond7 = (upper_wick / candle_range) < 0.5  # relaxed slightly
+
+    # ===============================
+    # GAP FILTER (NEW)
+    # ===============================
+
+    gap_percent = abs((open_p - prev_close) / prev_close) * 100
+    cond8 = gap_percent <= 1
+
+    # ===============================
+    # INTRADAY MOVE FILTER (NEW)
+    # ===============================
+
+    intraday_change = abs((close_p - open_p) / open_p) * 100
+    cond9 = intraday_change <= 2
+
+    # ===============================
+    # FINAL FILTER
+    # ===============================
+
+    if (
+        cond1 and cond2 and cond3
+        and cond4 and cond5
+        and cond6 and cond7
+        and cond8 and cond9
+    ):
+        valid_15m.append(idx)
 
         # =========================================
         # STEP 2 → 5m VWAP SCORE (OUT OF 5)
