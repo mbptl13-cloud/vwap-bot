@@ -1,4 +1,5 @@
-python-telegram-bot==20.3
+python-telegram-bot==21.6
 pandas
 yfinance
 requests
+httpx==0.27.2
