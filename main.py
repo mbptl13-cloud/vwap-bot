@@ -203,7 +203,7 @@ def find_trade(stock, date):
         # =========================================
 # STEP 1 → 15m FILTER (PASS / FAIL) - FIXED
 # =========================================
-
+try:
 valid_15m = []
 
 # previous day close (SAFE VERSION)
