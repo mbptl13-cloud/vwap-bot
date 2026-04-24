@@ -1,24 +1,3 @@
-FULL FINAL HYBRID VWAP TELEGRAM BOT
-
-WITH:
-
-1. Full F&O Hybrid Watchlist
-
-2. 15m Institutional Filter (Pass/Fail)
-
-3. 5m VWAP Price Action Score (Out of 5)
-
-4. Only Score >= 4 Allowed
-
-5. Commands:
-
-LIVE
-
-2026-04-06
-
-BHEL 2026-04-06
-
-BHEL 2026-04-01 to 2026-04-20
 
 import os
 import asyncio
