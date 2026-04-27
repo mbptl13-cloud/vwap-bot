@@ -1,18 +1,4 @@
-# FULL FINAL HYBRID VWAP TELEGRAM BOT
-# WITH:
-# 1. Full F&O Hybrid Watchlist
-# 2. 15m Institutional Filter (Pass/Fail)
-# 3. 5m VWAP Price Action Score (Out of 5)
-# 4. Only Score >= 4 Allowed
-# 5. Commands:
-#    LIVE
-#    2026-04-06
-#    BHEL 2026-04-06
-#    BHEL 2026-04-01 to 2026-04-20
-
-import os
 import asyncio
-import requests
 import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
@@ -31,9 +17,6 @@ from telegram.ext import (
 
 BOT_TOKEN = "8578450014:AAHQ_Eu9C-XIxRXD1760WL_1UQtVP4dbQW4"
 
-# Optional direct token
-# BOT_TOKEN = "YOUR_BOT_TOKEN"
-
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN not found")
 
@@ -44,99 +27,35 @@ if not BOT_TOKEN:
 
 def safe_float(value):
     try:
-        if hasattr(value, "iloc"):
-            return float(value.iloc[0])
         return float(value)
     except:
         return None
 
 
 # =====================================================
-# HYBRID FULL F&O WATCHLIST
+# WATCHLIST
 # =====================================================
 
-def get_fno_stocks():
-    backup_stocks = [
-        "RELIANCE.NS", "HDFCBANK.NS", "ICICIBANK.NS",
-        "SBIN.NS", "AXISBANK.NS", "KOTAKBANK.NS",
-        "BAJFINANCE.NS", "BAJAJFINSV.NS",
-        "PFC.NS", "RECLTD.NS",
-        "TCS.NS", "INFY.NS", "WIPRO.NS",
-        "HCLTECH.NS", "TECHM.NS",
-        "LT.NS", "BHEL.NS", "HAL.NS", "BEL.NS",
-        "SIEMENS.NS", "ABB.NS",
-        "ADANIENT.NS", "ADANIPORTS.NS",
-        "ADANIGREEN.NS", "ADANIPOWER.NS", "ATGL.NS",
-        "TATASTEEL.NS", "JSWSTEEL.NS",
-        "HINDALCO.NS", "VEDL.NS",
-        "TATAMOTORS.NS", "MARUTI.NS", "M&M.NS",
-        "SUNPHARMA.NS", "DRREDDY.NS", "CIPLA.NS",
-        "ITC.NS", "HINDUNILVR.NS",
-        "TRENT.NS", "KAYNES.NS", "POLICYBZR.NS",
-        "AMBER.NS", "INOXWIND.NS"
-    ]
-
-    try:
-        session = requests.Session()
-
-        headers = {
-            "User-Agent": "Mozilla/5.0",
-            "Accept-Language": "en-US,en;q=0.9",
-            "Referer": "https://www.nseindia.com/"
-        }
-
-        session.get(
-            "https://www.nseindia.com/",
-            headers=headers,
-            timeout=10
-        )
-
-        url = "https://www.nseindia.com/api/equity-stockIndices?index=SECURITIES%20IN%20F%26O"
-
-        response = session.get(
-            url,
-            headers=headers,
-            timeout=10
-        )
-
-        data = response.json()
-
-        live_stocks = []
-
-        for item in data["data"]:
-            symbol = item["symbol"].strip()
-            if symbol:
-                live_stocks.append(symbol + ".NS")
-
-        final_watchlist = list(
-            set(live_stocks + backup_stocks)
-        )
-
-    except:
-        final_watchlist = backup_stocks
-
-    must_have = [
-        "ADANIGREEN.NS",
-        "ADANIPOWER.NS",
-        "TRENT.NS",
-        "BHEL.NS",
-        "PFC.NS",
-        "HAL.NS"
-    ]
-
-    for stock in must_have:
-        if stock not in final_watchlist:
-            final_watchlist.append(stock)
-
-    final_watchlist = list(set(final_watchlist))
-    final_watchlist.sort()
-
-    print("WATCHLIST SIZE:", len(final_watchlist))
-
-    return final_watchlist
-
-
-WATCHLIST = get_fno_stocks()
+WATCHLIST = [
+    "RELIANCE.NS",
+    "HDFCBANK.NS",
+    "ICICIBANK.NS",
+    "SBIN.NS",
+    "AXISBANK.NS",
+    "KOTAKBANK.NS",
+    "BAJFINANCE.NS",
+    "TCS.NS",
+    "INFY.NS",
+    "HCLTECH.NS",
+    "LT.NS",
+    "BHEL.NS",
+    "HAL.NS",
+    "BEL.NS",
+    "ADANIGREEN.NS",
+    "ADANIPOWER.NS",
+    "TRENT.NS",
+    "PFC.NS"
+]
 
 
 # =====================================================
@@ -147,13 +66,8 @@ def calculate_vwap(df):
     df = df.copy()
 
     df["cum_vol"] = df["Volume"].cumsum()
-    df["cum_vol_price"] = (
-        (df["Close"] * df["Volume"]).cumsum()
-    )
-
-    df["VWAP"] = (
-        df["cum_vol_price"] / df["cum_vol"]
-    )
+    df["cum_vp"] = (df["Close"] * df["Volume"]).cumsum()
+    df["VWAP"] = df["cum_vp"] / df["cum_vol"]
 
     return df
 
@@ -163,9 +77,14 @@ def calculate_vwap(df):
 # =====================================================
 
 def find_trade(stock, date):
+
     try:
         start = date
-        end = pd.to_datetime(date) + pd.Timedelta(days=1)
+        end = pd.to_datetime(date) + timedelta(days=1)
+
+        # -----------------------------
+        # DOWNLOAD DATA
+        # -----------------------------
 
         df15 = yf.download(
             stock,
@@ -185,9 +104,10 @@ def find_trade(stock, date):
             auto_adjust=True
         )
 
-        if len(df15) < 5 or len(df5) < 10:
+        if len(df15) < 10 or len(df5) < 20:
             return None
 
+        # timezone safe
         if df15.index.tz is not None:
             df15.index = df15.index.tz_convert(
                 "Asia/Kolkata"
@@ -200,78 +120,112 @@ def find_trade(stock, date):
 
         df5 = calculate_vwap(df5)
 
-        # =========================================
-        # STEP 1 → 15m FILTER (PASS / FAIL)
-        # =========================================
+        # -----------------------------
+        # PREVIOUS DAY CLOSE
+        # -----------------------------
+
+        df_daily = yf.download(
+            stock,
+            interval="1d",
+            period="5d",
+            progress=False,
+            auto_adjust=True
+        )
+
+        if len(df_daily) < 2:
+            return None
+
+        prev_close = safe_float(
+            df_daily["Close"].iloc[-2]
+        )
+
+        if prev_close is None:
+            return None
+
+        # -----------------------------
+        # 15m FILTER
+        # -----------------------------
+
+        df15["vol_sma_20"] = (
+            df15["Volume"].rolling(20).mean()
+        )
 
         valid_15m = []
-
-        avg_vol = safe_float(
-            df15["Volume"].rolling(20).mean().iloc[-1]
-        )
 
         for idx, row in df15.iterrows():
 
             if idx.time() <= pd.to_datetime("09:30").time():
                 continue
 
-            open_p = safe_float(row["Open"])
-            high_p = safe_float(row["High"])
-            low_p = safe_float(row["Low"])
-            close_p = safe_float(row["Close"])
-            vol = safe_float(row["Volume"])
+            o = safe_float(row["Open"])
+            h = safe_float(row["High"])
+            l = safe_float(row["Low"])
+            c = safe_float(row["Close"])
+            v = safe_float(row["Volume"])
+            vol_sma = safe_float(row["vol_sma_20"])
 
-            if None in [
-                open_p, high_p,
-                low_p, close_p, vol
-            ]:
+            if None in [o, h, l, c, v]:
                 continue
 
-            candle_range = high_p - low_p
-            body = abs(close_p - open_p)
-            upper_wick = high_p - close_p
-
+            candle_range = h - l
             if candle_range <= 0:
                 continue
 
-            cond1 = vol > 500000
-            cond2 = (close_p * vol) > 150000000
+            body = abs(c - o)
+            upper_wick = h - max(o, c)
 
-            range_percent = (
-                (high_p - low_p) / open_p
-            ) * 100
+            # Condition 1 → volume
+            cond1 = v > 200000
 
-            cond3 = range_percent > 1
+            # Condition 2 → candle range
+            range_pct = (candle_range / o) * 100
+            cond2 = range_pct > 0.4
 
-            body_percent = (
-                body / open_p
-            ) * 100
+            # Condition 3 → body size
+            body_pct = (body / o) * 100
+            cond3 = body_pct > 0.4
 
-            cond4 = body_percent > 0.6
-            cond5 = close_p > open_p
+            # Condition 4 → bullish candle
+            cond4 = c > o
 
+            # Condition 5 → volume spike
+            cond5 = (
+                vol_sma is not None
+                and v > (1.5 * vol_sma)
+            )
+
+            # Condition 6 → wick quality
             cond6 = (
-                avg_vol is not None
-                and vol > avg_vol * 2
+                (upper_wick / candle_range) < 0.5
             )
 
-            cond7 = (
-                (upper_wick / candle_range) < 0.3
-            )
+            # Condition 7 → gap filter
+            gap_pct = abs(
+                (o - prev_close) / prev_close
+            ) * 100
+
+            cond7 = gap_pct <= 1
+
+            # Condition 8 → intraday move filter
+            intraday_pct = abs(
+                (c - o) / o
+            ) * 100
+
+            cond8 = intraday_pct <= 2
 
             if (
-                cond1 and cond2 and cond3
-                and cond4 and cond5
-                and cond6 and cond7
+                cond1 and cond2 and cond3 and cond4
+                and cond5 and cond6
+                and cond7 and cond8
             ):
                 valid_15m.append(idx)
 
         if not valid_15m:
             return None
 
-        # =========================================
-        # STEP 2 → 5m VWAP SCORE (OUT OF 5)
-        # =========================================
+        # -----------------------------
+        # 5m VWAP SCORING
+        # -----------------------------
 
         for i in range(2, len(df5)):
 
@@ -286,19 +240,16 @@ def find_trade(stock, date):
             row = df5.iloc[i]
             prev = df5.iloc[i - 1]
 
-            low_p = safe_float(row["Low"])
-            high_p = safe_float(row["High"])
-            close_p = safe_float(row["Close"])
-            open_p = safe_float(row["Open"])
+            low = safe_float(row["Low"])
+            high = safe_float(row["High"])
+            close = safe_float(row["Close"])
             vol = safe_float(row["Volume"])
             vwap = safe_float(row["VWAP"])
             prev_high = safe_float(prev["High"])
 
             if None in [
-                low_p, high_p,
-                close_p, open_p,
-                vol, vwap,
-                prev_high
+                low, high, close,
+                vol, vwap, prev_high
             ]:
                 continue
 
@@ -317,34 +268,34 @@ def find_trade(stock, date):
             if current_time <= latest_trigger:
                 continue
 
-            # =========================================
-            # VWAP SCORE SYSTEM
-            # =========================================
+            # -----------------------------
+            # VWAP SCORE OUT OF 5
+            # -----------------------------
 
             score = 0
 
-            # 1. Clean VWAP Touch
-            if low_p <= vwap * 1.002:
+            # 1. Clean VWAP touch
+            if low <= vwap * 1.002:
                 score += 1
 
-            # 2. Strong Rejection
+            # 2. Strong rejection
             wick_rejection = (
-                (close_p - low_p)
-                > ((high_p - low_p) * 0.5)
+                (close - low)
+                > ((high - low) * 0.5)
             )
 
             if wick_rejection:
                 score += 1
 
-            # 3. Bullish Close Above VWAP
-            if close_p > vwap:
+            # 3. Close above VWAP
+            if close > vwap:
                 score += 1
 
-            # 4. Breakout Above Previous High
-            if close_p > prev_high:
+            # 4. Breakout above previous high
+            if close > prev_high:
                 score += 1
 
-            # 5. Volume Expansion
+            # 5. Volume expansion
             avg_5m_vol = safe_float(
                 df5["Volume"].rolling(20).mean().iloc[i]
             )
@@ -355,15 +306,14 @@ def find_trade(stock, date):
             ):
                 score += 1
 
-            # Only strong setups allowed
             if score < 4:
                 continue
 
-            # =========================================
-            # ENTRY
-            # =========================================
+            # -----------------------------
+            # ENTRY LOGIC
+            # -----------------------------
 
-            entry = round(close_p, 2)
+            entry = round(close, 2)
             sl = round(vwap, 2)
 
             risk = entry - sl
@@ -412,44 +362,22 @@ def find_trade(stock, date):
         return None
 
     except Exception as e:
-        return f"ERROR: {str(e)}"
+        print(f"ERROR in {stock}: {str(e)}")
+        return None
 
 
 # =====================================================
-# DATE SCAN → FULL WATCHLIST
+# FULL SCAN
 # =====================================================
 
-def full_date_scan(date):
+def full_scan(date):
     results = []
 
     for stock in WATCHLIST:
         result = find_trade(stock, date)
 
-        if result and not isinstance(result, str):
+        if result:
             results.append(result)
-
-    return results
-
-
-# =====================================================
-# RANGE SCAN
-# =====================================================
-
-def range_scan(stock, start_date, end_date):
-    results = []
-
-    current = pd.to_datetime(start_date)
-    end = pd.to_datetime(end_date)
-
-    while current <= end:
-        day = current.strftime("%Y-%m-%d")
-
-        result = find_trade(stock, day)
-
-        if result and not isinstance(result, str):
-            results.append(result)
-
-        current += timedelta(days=1)
 
     return results
 
@@ -458,15 +386,61 @@ def range_scan(stock, start_date, end_date):
 # TELEGRAM HANDLER
 # =====================================================
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
+async def handle_message(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
 
-    if len(text) == 10 and text.count("-") == 2:
+    text = update.message.text.strip().upper()
+
+    # =========================================
+    # LIVE COMMAND
+    # =========================================
+
+    if text == "LIVE":
+
+        today = datetime.now().strftime("%Y-%m-%d")
+
         await update.message.reply_text(
-            f"Scanning full F&O for {text}"
+            f"📡 Running LIVE scan for {today}..."
         )
 
-        results = full_date_scan(text)
+        results = full_scan(today)
+
+        if not results:
+            await update.message.reply_text(
+                "❌ No live trades found"
+            )
+            return
+
+        msg = f"🔥 LIVE VWAP RESULTS - {today}\n\n"
+
+        for r in results:
+            msg += (
+                f"{r['stock']}\n"
+                f"15m: {r['trigger']}\n"
+                f"5m: {r['entry_time']}\n"
+                f"VWAP Score: {r['score']}\n"
+                f"Entry: {r['entry']} | "
+                f"SL: {r['sl']} | "
+                f"Target: {r['target']}\n"
+                f"Result: {r['result']}\n\n"
+            )
+
+        await update.message.reply_text(msg)
+        return
+
+    # =========================================
+    # DATE COMMAND
+    # =========================================
+
+    if len(text) == 10 and text.count("-") == 2:
+
+        await update.message.reply_text(
+            f"Scanning full F&O for {text}..."
+        )
+
+        results = full_scan(text)
 
         if not results:
             await update.message.reply_text(
@@ -491,6 +465,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(msg)
         return
 
+    # =========================================
+    # HELP
+    # =========================================
+
     await update.message.reply_text(
         "Use:\n"
         "LIVE\n"
@@ -505,6 +483,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =====================================================
 
 async def main():
+
     print("BOT RUNNING...")
 
     app = ApplicationBuilder().token(
