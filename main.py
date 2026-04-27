@@ -701,11 +701,6 @@ if len(text) == 10 and text.count("-") == 2:
     await update.message.reply_text(msg)
     return
 
-
-        await update.message.reply_text(msg)
-        return
-
-
     # HELP
     await update.message.reply_text(
         "Use:\n"
