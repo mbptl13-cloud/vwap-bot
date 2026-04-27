@@ -276,49 +276,51 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     elif " TO " in text:
-        try:
-            parts = text.split()
-            stock = parts[0] + ".NS"
-            start_date = parts[1]
-            end_date = parts[3]
+    try:
+        parts = text.split()
 
+        stock = parts[0] + ".NS"
+        start_date = parts[1]
+        end_date = parts[3]
+
+        await update.message.reply_text(
+            f"Scanning {stock} from {start_date} to {end_date}..."
+        )
+
+        results = range_scan(stock, start_date, end_date)
+
+        if not results:
             await update.message.reply_text(
-                f"Scanning {stock} from {start_date} to {end_date}..."
+                "❌ No trades found"
+            )
+            return
+
+        msg = f"🔥 RANGE RESULT - {stock}\n\n"
+
+        for r in results:
+            msg += (
+                f"Date: {r['date']}\n"
+                f"15M Count: {r['valid_15m_count']}\n"
+                f"15M Trigger: {r['trigger_times']}\n"
+                f"5M Entry: {r['five_min_entry']}\n"
+                f"5M Time: {r['best_5m_time']}\n"
+                f"VWAP Score: {r['best_score']}\n"
+                f"Entry: {r['entry']}\n"
+                f"SL: {r['sl']}\n"
+                f"TGT: {r['target']}\n\n"
             )
 
-            current = pd.to_datetime(start_date)
-            end_dt = pd.to_datetime(end_date)
-            results = []
+            if len(msg) > 3500:
+                await update.message.reply_text(msg)
+                msg = ""
 
-            while current <= end_dt:
-                day = current.strftime("%Y-%m-%d")
-                result = find_trade(stock, day)
-                if result:
-                    results.append(result)
-                current += timedelta(days=1)
-
-            if not results:
-                await update.message.reply_text("❌ No trades found")
-                return
-
-            msg = f"🔥 RANGE RESULT - {stock}
-
-"
-            for r in results:
-                msg += (
-                    f"Date Trigger: {r['trigger_times']}
-"
-                    f"15M Count: {r['valid_15m_count']}
-
-"
-                )
-
+        if msg:
             await update.message.reply_text(msg)
-            return
 
-        except Exception:
-            await update.message.reply_text("❌ Invalid range format")
-            return
+        return
+
+    except Exception as e:
+        print("RANGE ERROR:", str(e))
 
     elif len(text) == 10 and text.count("-") == 2:
         await update.message.reply_text(f"Scanning full F&O for {text}...")
