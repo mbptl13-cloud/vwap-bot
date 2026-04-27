@@ -307,105 +307,7 @@ def calculate_vwap(df):
 # MAIN STRATEGY
 # =====================================================
 
-def find_trade(stock, date):
-    try:
-        start = date
-        end = pd.to_datetime(date) + timedelta(days=1)
 
-        # -----------------------------
-        # DOWNLOAD DATA
-        # -----------------------------
-
-        df15 = yf.download(
-            stock,
-            interval="15m",
-            start=start,
-            end=end,
-            progress=False,
-            auto_adjust=True
-        )
-
-        df5 = yf.download(
-            stock,
-            interval="5m",
-            start=start,
-            end=end,
-            progress=False,
-            auto_adjust=True
-        )
-
-        if len(df15) < 10 or len(df5) < 20:
-            return None
-
-        # timezone safe
-        if df15.index.tz is not None:
-            df15.index = df15.index.tz_convert(
-                "Asia/Kolkata"
-            ).tz_localize(None)
-
-        if df5.index.tz is not None:
-            df5.index = df5.index.tz_convert(
-                "Asia/Kolkata"
-            ).tz_localize(None)
-
-        df5 = calculate_vwap(df5)
-
-        # -----------------------------
-        # PREVIOUS DAY CLOSE
-        # -----------------------------
-
-        df_daily = yf.download(
-            stock,
-            interval="1d",
-            period="5d",
-            progress=False,
-            auto_adjust=True
-        )
-
-        if len(df_daily) < 2:
-            return None
-
-        prev_close = safe_float(
-            df_daily["Close"].iloc[-2]
-        )
-
-        if prev_close is None:
-            return None
-
-        # -----------------------------
-        # 15m FILTER
-        # -----------------------------
-
-        df15["vol_sma_20"] = (
-            df15["Volume"].rolling(20).mean()
-        )
-
-        valid_15m = []
-
-        for idx, row in df15.iterrows():
-
-            if idx.time() <= pd.to_datetime("09:30").time():
-                continue
-
-            o = safe_float(row["Open"])
-            h = safe_float(row["High"])
-            l = safe_float(row["Low"])
-            c = safe_float(row["Close"])
-            v = safe_float(row["Volume"])
-            vol_sma = safe_float(row["vol_sma_20"])
-
-            if None in [o, h, l, c, v]:
-                continue
-
-            candle_range = h - l
-            if candle_range <= 0:
-                continue
-
-            body = abs(c - o)
-            upper_wick = h - max(o, c)
-
-            # Condition 1 → volume
-            cond1 = v > 200000
 
             # Condition 2 → candle range
             range_pct = (candle_range / o) * 100
@@ -544,49 +446,248 @@ def find_trade(stock, date):
             sl = round(vwap, 2)
 
             risk = entry - sl
+# =========================================
+# REPLACE YOUR find_trade() FUNCTION
+# WITH THIS VERSION
+#
+# OUTPUT FORMAT:
+#
+# BHEL.NS
+# 15M Count - 2
+# 15M Trigger: 09:45, 10:15
+# 5M Entry: YES / NO
+# 5M Time - 10:45 / None
+# VWAP Score - 4/5
+# Entry -
+# SL -
+# TGT -
+# =========================================
 
-            if risk <= 0:
+def find_trade(stock, date):
+    try:
+        start = date
+        end = pd.to_datetime(date) + timedelta(days=1)
+
+        df15 = yf.download(
+            stock,
+            interval="15m",
+            start=start,
+            end=end,
+            progress=False,
+            auto_adjust=True
+        )
+
+        df5 = yf.download(
+            stock,
+            interval="5m",
+            start=start,
+            end=end,
+            progress=False,
+            auto_adjust=True
+        )
+
+        if len(df15) < 10 or len(df5) < 20:
+            return None
+
+        if df15.index.tz is not None:
+            df15.index = df15.index.tz_convert(
+                "Asia/Kolkata"
+            ).tz_localize(None)
+
+        if df5.index.tz is not None:
+            df5.index = df5.index.tz_convert(
+                "Asia/Kolkata"
+            ).tz_localize(None)
+
+        df5 = calculate_vwap(df5)
+
+        # =====================================
+        # PREVIOUS DAY CLOSE
+        # =====================================
+
+        df_daily = yf.download(
+            stock,
+            interval="1d",
+            period="5d",
+            progress=False,
+            auto_adjust=True
+        )
+
+        if len(df_daily) < 2:
+            return None
+
+        prev_close = safe_float(
+            df_daily["Close"].iloc[-2]
+        )
+
+        if prev_close is None:
+            return None
+
+        # =====================================
+        # 15M FILTER
+        # =====================================
+
+        df15["vol_sma_20"] = (
+            df15["Volume"].rolling(20).mean()
+        )
+
+        valid_15m = []
+
+        for idx, row in df15.iterrows():
+
+            if idx.time() <= pd.to_datetime("09:30").time():
                 continue
 
-            if risk < (entry * 0.003):
+            o = safe_float(row["Open"])
+            h = safe_float(row["High"])
+            l = safe_float(row["Low"])
+            c = safe_float(row["Close"])
+            v = safe_float(row["Volume"])
+            vol_sma = safe_float(row["vol_sma_20"])
+
+            if None in [o, h, l, c, v]:
                 continue
 
-            target = round(
-                entry + (risk * 2),
-                2
+            candle_range = h - l
+            if candle_range <= 0:
+                continue
+
+            body = abs(c - o)
+            upper_wick = h - max(o, c)
+
+            cond1 = v > 100000
+            cond2 = ((candle_range / o) * 100) > 0.25
+            cond3 = ((body / o) * 100) > 0.25
+            cond4 = c > o
+
+            cond5 = (
+                vol_sma is not None
+                and v > (1.2 * vol_sma)
             )
 
-            result = "OPEN"
+            cond6 = (
+                (upper_wick / candle_range) < 0.5
+            )
 
-            for j in range(i + 1, len(df5)):
-                future = df5.iloc[j]
+            gap_pct = abs(
+                (o - prev_close) / prev_close
+            ) * 100
 
-                f_low = safe_float(future["Low"])
-                f_high = safe_float(future["High"])
+            cond7 = gap_pct <= 1
 
-                if f_low is None or f_high is None:
-                    continue
+            intraday_pct = abs(
+                (c - o) / o
+            ) * 100
 
-                if f_low <= sl:
-                    result = "LOSS"
-                    break
+            if (
+                cond1 and cond2 and cond3 and cond4
+                and cond5 and cond6
+                and cond7
+            ):
+                valid_15m.append(idx)
 
-                if f_high >= target:
-                    result = "WIN"
-                    break
+        if not valid_15m:
+            return None
 
-            return {
-                "stock": stock,
-                "trigger": str(latest_trigger),
-                "entry_time": str(current_time),
-                "score": f"{score}/5",
-                "entry": entry,
-                "sl": sl,
-                "target": target,
-                "result": result
-            }
+        # =====================================
+        # 5M CHECK
+        # =====================================
 
-        return None
+        best_score = 0
+        best_time = None
+        best_entry = None
+        best_sl = None
+        best_target = None
+        five_min_entry = "NO"
+
+        for i in range(2, len(df5)):
+
+            current_time = df5.index[i]
+
+            if current_time.time() < pd.to_datetime("09:45").time():
+                continue
+
+            if current_time.time() > pd.to_datetime("13:30").time():
+                break
+
+            row = df5.iloc[i]
+            prev = df5.iloc[i - 1]
+
+            low = safe_float(row["Low"])
+            high = safe_float(row["High"])
+            close = safe_float(row["Close"])
+            vol = safe_float(row["Volume"])
+            vwap = safe_float(row["VWAP"])
+            prev_high = safe_float(prev["High"])
+
+            if None in [low, high, close, vol, vwap, prev_high]:
+                continue
+
+            score = 0
+
+            if low <= vwap * 1.002:
+                score += 1
+
+            if (close - low) > ((high - low) * 0.5):
+                score += 1
+
+            if close > vwap:
+                score += 1
+
+            if close > prev_high:
+                score += 1
+
+            avg_5m_vol = safe_float(
+                df5["Volume"].rolling(20).mean().iloc[i]
+            )
+
+            if (
+                avg_5m_vol is not None
+                and vol > avg_5m_vol * 1.5
+            ):
+                score += 1
+
+            if score > best_score:
+                best_score = score
+                best_time = current_time.strftime("%H:%M")
+
+                entry = round(close, 2)
+                sl = round(vwap, 2)
+
+                risk = entry - sl
+
+                if risk > 0:
+                    target = round(
+                        entry + (risk * 2),
+                        2
+                    )
+
+                    best_entry = entry
+                    best_sl = sl
+                    best_target = target
+
+            if score >= 3:
+                five_min_entry = "YES"
+
+        # =====================================
+        # FINAL RESULT
+        # =====================================
+
+        trigger_times = ", ".join(
+            [x.strftime("%H:%M") for x in valid_15m]
+        )
+
+        return {
+            "stock": stock,
+            "valid_15m_count": len(valid_15m),
+            "trigger_times": trigger_times,
+            "five_min_entry": five_min_entry,
+            "best_5m_time": best_time if best_time else "None",
+            "best_score": f"{best_score}/5",
+            "entry": best_entry if best_entry else "-",
+            "sl": best_sl if best_sl else "-",
+            "target": best_target if best_target else "-"
+        }
 
     except Exception as e:
         print(f"ERROR in {stock}: {str(e)}")
