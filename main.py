@@ -644,6 +644,69 @@ def range_scan(stock, start_date, end_date):
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip().upper()
 
+# =========================================
+# ADD THIS INSIDE handle_message()
+# KEEP OLD 4 COMMANDS SAME
+#
+# NEW COMMAND:
+# 2026-04-06 15M
+#
+# This will show:
+# All stocks where only 15m condition matched
+# Whether 5m entry happened or not
+# =========================================
+
+# =========================================
+# NEW 15M SCAN COMMAND
+# Example:
+# 2026-04-06 15M
+# =========================================
+
+if len(text.split()) == 2 and text.split()[1] == "15M":
+    scan_date = text.split()[0]
+
+    await update.message.reply_text(
+        f"Scanning 15M institutional setups for {scan_date}..."
+    )
+
+    results = []
+
+    for stock in WATCHLIST:
+        result = find_trade(stock, scan_date)
+
+        if result:
+            results.append(result)
+
+    if not results:
+        await update.message.reply_text(
+            "❌ No 15M setups found"
+        )
+        return
+
+    msg = f"🔥 15M FILTER RESULT - {scan_date}\n\n"
+
+    for r in results:
+        msg += (
+            f"{r['stock']}\n"
+            f"15M Trigger: {r['first_15m_trigger']}\n"
+            f"15M Count: {r['valid_15m_count']}\n"
+            f"5M Entry: {r['five_min_entry']}\n"
+            f"Best Score: {r['best_score']}\n"
+            f"Best 5M Time: {r['best_5m_time']}\n\n"
+        )
+
+        # avoid telegram message too long error
+        if len(msg) > 3500:
+            await update.message.reply_text(msg)
+            msg = ""
+
+    if msg:
+        await update.message.reply_text(msg)
+
+    return
+
+    
+
     # =========================================
     # LIVE SCAN
     # =========================================
