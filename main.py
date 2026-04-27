@@ -701,12 +701,14 @@ async def handle_message(
 # =====================================================
 
 async def main():
-
     print("BOT RUNNING...")
+
+    keep_alive()
 
     app = ApplicationBuilder().token(
         BOT_TOKEN
     ).build()
+
 
     app.add_handler(
         MessageHandler(
