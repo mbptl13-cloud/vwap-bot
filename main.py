@@ -384,8 +384,8 @@ for idx, row in df15.iterrows():
     ):
         valid_15m.append(idx)
 
-if not valid_15m:
-    return None
+     if not valid_15m:
+         return None
 
 # PASTE THIS COMPLETE 5M VWAP SCORING BLOCK
 # EXACTLY BELOW:
