@@ -585,19 +585,20 @@ def find_trade(stock, date):
 
 
 # =====================================================
-# FULL SCAN
+# DATE SCAN → FULL WATCHLIST
 # =====================================================
 
-def full_scan(date):
+def full_date_scan(date):
     results = []
 
     for stock in WATCHLIST:
         result = find_trade(stock, date)
 
-        if result:
+        if result and not isinstance(result, str):
             results.append(result)
 
     return results
+
 
 
 # =====================================================
