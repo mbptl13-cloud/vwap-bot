@@ -1,8 +1,19 @@
-import os import asyncio from datetime import datetime, timedelta from threading import Thread
+import os
+import asyncio
+from datetime import datetime, timedelta
+from threading import Thread
 
-import pandas as pd import yfinance as yf from flask import Flask
+import pandas as pd
+import yfinance as yf
+from flask import Flask
 
-from telegram import Update from telegram.ext import ( ApplicationBuilder, MessageHandler, ContextTypes, filters, )
+from telegram import Update
+from telegram.ext import ( 
+    ApplicationBuilder, 
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
 
 =====================================================
 
@@ -10,7 +21,7 @@ BOT TOKEN
 
 =====================================================
 
-BOT_TOKEN = "PASTE_YOUR_BOT_TOKEN_HERE"
+BOT_TOKEN = "8578450014:AAHQ_Eu9C-XIxRXD1760WL_1UQtVP4dbQW4"
 
 if not BOT_TOKEN: raise ValueError("BOT_TOKEN not found")
 
