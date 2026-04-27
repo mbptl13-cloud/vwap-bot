@@ -308,84 +308,83 @@ def calculate_vwap(df):
 # =====================================================
 
 
-# PASTE THIS COMPLETE 15M FILTER BLOCK INSIDE find_trade()
-# THIS FIXES YOUR INDENTATION ERROR
+# Your problem is mixed spaces/tabs or wrong alignment.
+# DELETE the full old 15m + 5m section inside find_trade()
+# Then paste this CLEAN properly indented block exactly.
 
-# -----------------------------
-# 15m FILTER
-# -----------------------------
+        # -----------------------------
+        # 15m FILTER
+        # -----------------------------
 
-df15["vol_sma_20"] = df15["Volume"].rolling(20).mean()
+        df15["vol_sma_20"] = df15["Volume"].rolling(20).mean()
 
-valid_15m = []
+        valid_15m = []
 
-for idx, row in df15.iterrows():
+        for idx, row in df15.iterrows():
 
-    if idx.time() <= pd.to_datetime("09:30").time():
-        continue
+            if idx.time() <= pd.to_datetime("09:30").time():
+                continue
 
-    o = safe_float(row["Open"])
-    h = safe_float(row["High"])
-    l = safe_float(row["Low"])
-    c = safe_float(row["Close"])
-    v = safe_float(row["Volume"])
-    vol_sma = safe_float(row["vol_sma_20"])
+            o = safe_float(row["Open"])
+            h = safe_float(row["High"])
+            l = safe_float(row["Low"])
+            c = safe_float(row["Close"])
+            v = safe_float(row["Volume"])
+            vol_sma = safe_float(row["vol_sma_20"])
 
-    if None in [o, h, l, c, v]:
-        continue
+            if None in [o, h, l, c, v]:
+                continue
 
-    candle_range = h - l
+            candle_range = h - l
 
-    if candle_range <= 0:
-        continue
+            if candle_range <= 0:
+                continue
 
-    body = abs(c - o)
-    upper_wick = h - max(o, c)
+            body = abs(c - o)
+            upper_wick = h - max(o, c)
 
-    # Condition 1 → volume
-    cond1 = v > 200000
+            # Condition 1
+            cond1 = v > 500000
 
-    # Condition 2 → candle range
-    range_pct = (candle_range / o) * 100
-    cond2 = range_pct > 0.4
+            # Condition 2
+            range_pct = (candle_range / o) * 100
+            cond2 = range_pct > 0.4
 
-    # Condition 3 → body size
-    body_pct = (body / o) * 100
-    cond3 = body_pct > 0.4
+            # Condition 3
+            body_pct = (body / o) * 100
+            cond3 = body_pct > 0.4
 
-    # Condition 4 → bullish candle
-    cond4 = c > o
+            # Condition 4
+            cond4 = c > o
 
-    # Condition 5 → volume spike
-    cond5 = (
-        vol_sma is not None
-        and v > (1.5 * vol_sma)
-    )
+            # Condition 5
+            cond5 = (
+                vol_sma is not None
+                and v > (2 * vol_sma)
+            )
 
-    # Condition 6 → wick quality
-    cond6 = (
-        (upper_wick / candle_range) < 0.5
-    )
+            # Condition 6
+            cond6 = (
+                (upper_wick / candle_range) < 0.5
+            )
 
-    # Condition 7 → gap filter
-    gap_pct = abs(
-        (o - prev_close) / prev_close
-    ) * 100
+            # Condition 7
+            gap_pct = abs(
+                (o - prev_close) / prev_close
+            ) * 100
 
-    cond7 = gap_pct <= 1
+            cond7 = gap_pct <= 1
 
-    # FINAL FILTER
-    # Removed old Condition 8 (intraday % change <= 2)
+            # FINAL FILTER
+            if (
+                cond1 and cond2 and cond3
+                and cond4 and cond5
+                and cond6 and cond7
+            ):
+                valid_15m.append(idx)
 
-    if (
-        cond1 and cond2 and cond3
-        and cond4 and cond5
-        and cond6 and cond7
-    ):
-        valid_15m.append(idx)
-
-     if not valid_15m:
-         return None
+        if not valid_15m:
+            return None
 
 # PASTE THIS COMPLETE 5M VWAP SCORING BLOCK
 # EXACTLY BELOW:
