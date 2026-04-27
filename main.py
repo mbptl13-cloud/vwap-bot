@@ -672,31 +672,35 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(msg)
         return
 
-        # DATE ONLY
-    if len(text) == 10 and text.count("-") == 2:
-        await update.message.reply_text(
-            f"Scanning full F&O for {text}"
+       # DATE ONLY
+if len(text) == 10 and text.count("-") == 2:
+    await update.message.reply_text(
+        f"Scanning full F&O for {text}"
+    )
+
+    results = full_date_scan(text)
+
+    if not results:
+        await update.message.reply_text("❌ No trades found")
+        return
+
+    msg = f"🔥 DATE RESULT - {text}\n\n"
+
+    for r in results:
+        msg += (
+            f"{r['stock']}\n"
+            f"15m: {r['trigger']}\n"
+            f"5m: {r['entry_time']}\n"
+            f"VWAP Score: {r['score']}\n"
+            f"Entry: {r['entry']} | "
+            f"SL: {r['sl']} | "
+            f"Target: {r['target']}\n"
+            f"Result: {r['result']}\n\n"
         )
 
-        results = full_date_scan(text)
+    await update.message.reply_text(msg)
+    return
 
-        if not results:
-            await update.message.reply_text("❌ No trades found")
-            return
-
-        msg = f"🔥 DATE RESULT - {text}\n\n"
-
-        for r in results:
-            msg += (
-                f"{r['stock']}\n"
-                f"15m: {r['trigger']}\n"
-                f"5m: {r['entry_time']}\n"
-                f"VWAP Score: {r['score']}\n"
-                f"Entry: {r['entry']} | "
-                f"SL: {r['sl']} | "
-                f"Target: {r['target']}\n"
-                f"Result: {r['result']}\n\n"
-            )
 
         await update.message.reply_text(msg)
         return
