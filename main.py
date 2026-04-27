@@ -1,7 +1,12 @@
+import os
 import asyncio
+import requests
 import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
+
+from flask import Flask
+from threading import Thread
 
 from telegram import Update
 from telegram.ext import (
@@ -19,6 +24,24 @@ BOT_TOKEN = "8578450014:AAHQ_Eu9C-XIxRXD1760WL_1UQtVP4dbQW4"
 
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN not found")
+# =====================================================
+# FLASK KEEP ALIVE FOR RENDER FREE PLAN
+# =====================================================
+
+app_web = Flask(__name__)
+
+@app_web.route("/")
+def home():
+    return "VWAP Bot Running"
+
+def run_web():
+    port = int(os.environ.get("PORT", 10000))
+    app_web.run(host="0.0.0.0", port=port)
+
+def keep_alive():
+    t = Thread(target=run_web)
+    t.start()
+    
 
 
 # =====================================================
