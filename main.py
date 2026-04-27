@@ -229,7 +229,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("❌ No trades found")
                 return
 
-            msg = f"🔥 RANGE RESULT - {stock}
+            msg = f"🔥 RANGE RESULT - {stock}\n\n"
 
 "
             for r in results:
