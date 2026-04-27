@@ -387,99 +387,149 @@ for idx, row in df15.iterrows():
 if not valid_15m:
     return None
 
-        # -----------------------------
-        # 5m VWAP SCORING
-        # -----------------------------
+# PASTE THIS COMPLETE 5M VWAP SCORING BLOCK
+# EXACTLY BELOW:
+# if not valid_15m:
+#     return None
 
-        for i in range(2, len(df5)):
+# -----------------------------
+# 5m VWAP SCORING
+# -----------------------------
 
-            current_time = df5.index[i]
+for i in range(2, len(df5)):
 
-            if current_time.time() < pd.to_datetime("09:45").time():
-                continue
+    current_time = df5.index[i]
 
-            if current_time.time() > pd.to_datetime("13:30").time():
-                break
+    if current_time.time() < pd.to_datetime("09:45").time():
+        continue
 
-            row = df5.iloc[i]
-            prev = df5.iloc[i - 1]
+    if current_time.time() > pd.to_datetime("13:30").time():
+        break
 
-            low = safe_float(row["Low"])
-            high = safe_float(row["High"])
-            close = safe_float(row["Close"])
-            vol = safe_float(row["Volume"])
-            vwap = safe_float(row["VWAP"])
-            prev_high = safe_float(prev["High"])
+    row = df5.iloc[i]
+    prev = df5.iloc[i - 1]
 
-            if None in [
-                low, high, close,
-                vol, vwap, prev_high
-            ]:
-                continue
+    low = safe_float(row["Low"])
+    high = safe_float(row["High"])
+    close = safe_float(row["Close"])
+    vol = safe_float(row["Volume"])
+    vwap = safe_float(row["VWAP"])
+    prev_high = safe_float(prev["High"])
 
-            latest_trigger = None
+    if None in [
+        low, high, close,
+        vol, vwap, prev_high
+    ]:
+        continue
 
-            for trigger in valid_15m:
-                if trigger < current_time:
-                    diff = current_time - trigger
+    latest_trigger = None
 
-                    if diff <= pd.Timedelta(minutes=60):
-                        latest_trigger = trigger
+    for trigger in valid_15m:
+        if trigger < current_time:
+            diff = current_time - trigger
 
-            if latest_trigger is None:
-                continue
+            if diff <= pd.Timedelta(minutes=60):
+                latest_trigger = trigger
 
-            if current_time <= latest_trigger:
-                continue
+    if latest_trigger is None:
+        continue
 
-            # -----------------------------
-            # VWAP SCORE OUT OF 5
-            # -----------------------------
+    if current_time <= latest_trigger:
+        continue
 
-            score = 0
+    # -----------------------------
+    # VWAP SCORE OUT OF 5
+    # -----------------------------
 
-            # 1. Clean VWAP touch
-            if low <= vwap * 1.002:
-                score += 1
+    score = 0
 
-            # 2. Strong rejection
-            wick_rejection = (
-                (close - low)
-                > ((high - low) * 0.5)
-            )
-            if wick_rejection:
-                score += 1
+    # 1. Clean VWAP touch
+    if low <= vwap * 1.002:
+        score += 1
 
-            # 3. Close above VWAP
-            if close > vwap:
-                score += 1
+    # 2. Strong rejection
+    wick_rejection = (
+        (close - low)
+        > ((high - low) * 0.5)
+    )
 
-            # 4. Breakout above previous high
-            if close > prev_high:
-                score += 1
+    if wick_rejection:
+        score += 1
 
-            # 5. Volume expansion
-            avg_5m_vol = safe_float(
-                df5["Volume"].rolling(20).mean().iloc[i]
-            )
+    # 3. Close above VWAP
+    if close > vwap:
+        score += 1
 
-            if (
-                avg_5m_vol is not None
-                and vol > avg_5m_vol * 1.5
-            ):
-                score += 1
+    # 4. Breakout above previous high
+    if close > prev_high:
+        score += 1
 
-            if score < 4:
-                continue
+    # 5. Volume expansion
+    avg_5m_vol = safe_float(
+        df5["Volume"].rolling(20).mean().iloc[i]
+    )
 
-            # -----------------------------
-            # ENTRY LOGIC
-            # -----------------------------
+    if (
+        avg_5m_vol is not None
+        and vol > avg_5m_vol * 1.5
+    ):
+        score += 1
 
-            entry = round(close, 2)
-            sl = round(vwap, 2)
+    if score < 4:
+        continue
 
-            risk = entry - sl
+    # -----------------------------
+    # ENTRY LOGIC
+    # -----------------------------
+
+    entry = round(close, 2)
+    sl = round(vwap, 2)
+
+    risk = entry - sl
+
+    if risk <= 0:
+        continue
+
+    if risk < (entry * 0.003):
+        continue
+
+    target = round(
+        entry + (risk * 2),
+        2
+    )
+
+    result = "OPEN"
+
+    for j in range(i + 1, len(df5)):
+        future = df5.iloc[j]
+
+        f_low = safe_float(future["Low"])
+        f_high = safe_float(future["High"])
+
+        if f_low is None or f_high is None:
+            continue
+
+        if f_low <= sl:
+            result = "LOSS"
+            break
+
+        if f_high >= target:
+            result = "WIN"
+            break
+
+    return {
+        "stock": stock,
+        "trigger": str(latest_trigger),
+        "entry_time": str(current_time),
+        "score": f"{score}/5",
+        "entry": entry,
+        "sl": sl,
+        "target": target,
+        "result": result
+    }
+
+return None
+        
 # =========================================
 # REPLACE YOUR find_trade() FUNCTION
 # WITH THIS VERSION
