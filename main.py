@@ -604,34 +604,27 @@ def full_scan(date):
 # TELEGRAM HANDLER
 # =====================================================
 
-async def handle_message(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip().upper()
 
     # =========================================
-    # LIVE COMMAND
+    # LIVE
     # =========================================
 
     if text == "LIVE":
-
         today = datetime.now().strftime("%Y-%m-%d")
 
         await update.message.reply_text(
-            f"📡 Running LIVE scan for {today}..."
+            f"Scanning LIVE F&O for {today}"
         )
 
-        results = full_scan(today)
+        results = full_date_scan(today)
 
         if not results:
-            await update.message.reply_text(
-                "❌ No live trades found"
-            )
+            await update.message.reply_text("❌ No trades found")
             return
 
-        msg = f"🔥 LIVE VWAP RESULTS - {today}\n\n"
+        msg = f"🔥 LIVE RESULT - {today}\n\n"
 
         for r in results:
             msg += (
@@ -639,9 +632,7 @@ async def handle_message(
                 f"15m: {r['trigger']}\n"
                 f"5m: {r['entry_time']}\n"
                 f"VWAP Score: {r['score']}\n"
-                f"Entry: {r['entry']} | "
-                f"SL: {r['sl']} | "
-                f"Target: {r['target']}\n"
+                f"Entry: {r['entry']} | SL: {r['sl']} | Target: {r['target']}\n"
                 f"Result: {r['result']}\n\n"
             )
 
@@ -649,21 +640,18 @@ async def handle_message(
         return
 
     # =========================================
-    # DATE COMMAND
+    # DATE ONLY → 2026-04-06
     # =========================================
 
     if len(text) == 10 and text.count("-") == 2:
-
         await update.message.reply_text(
-            f"Scanning full F&O for {text}..."
+            f"Scanning full F&O for {text}"
         )
 
-        results = full_scan(text)
+        results = full_date_scan(text)
 
         if not results:
-            await update.message.reply_text(
-                "❌ No trades found"
-            )
+            await update.message.reply_text("❌ No trades found")
             return
 
         msg = f"🔥 DATE RESULT - {text}\n\n"
@@ -674,9 +662,7 @@ async def handle_message(
                 f"15m: {r['trigger']}\n"
                 f"5m: {r['entry_time']}\n"
                 f"VWAP Score: {r['score']}\n"
-                f"Entry: {r['entry']} | "
-                f"SL: {r['sl']} | "
-                f"Target: {r['target']}\n"
+                f"Entry: {r['entry']} | SL: {r['sl']} | Target: {r['target']}\n"
                 f"Result: {r['result']}\n\n"
             )
 
@@ -684,16 +670,90 @@ async def handle_message(
         return
 
     # =========================================
-    # HELP
+    # SINGLE STOCK + DATE
+    # Example: VEDL 2026-04-27
+    # =========================================
+
+    parts = text.split()
+
+    if len(parts) == 2 and len(parts[1]) == 10:
+        stock = parts[0] + ".NS"
+        date = parts[1]
+
+        await update.message.reply_text(
+            f"Scanning {stock} for {date}"
+        )
+
+        result = find_trade(stock, date)
+
+        if not result or isinstance(result, str):
+            await update.message.reply_text("❌ No trade found")
+            return
+
+        msg = (
+            f"🔥 STOCK RESULT\n\n"
+            f"{result['stock']}\n"
+            f"15m: {result['trigger']}\n"
+            f"5m: {result['entry_time']}\n"
+            f"VWAP Score: {result['score']}\n"
+            f"Entry: {result['entry']}\n"
+            f"SL: {result['sl']}\n"
+            f"Target: {result['target']}\n"
+            f"Result: {result['result']}"
+        )
+
+        await update.message.reply_text(msg)
+        return
+
+    # =========================================
+    # RANGE SCAN
+    # Example:
+    # BHEL 2026-04-01 to 2026-04-20
+    # =========================================
+
+    if " TO " in text:
+        try:
+            stock = parts[0] + ".NS"
+            start_date = parts[1]
+            end_date = parts[3]
+
+            await update.message.reply_text(
+                f"Scanning {stock} from {start_date} to {end_date}"
+            )
+
+            results = range_scan(stock, start_date, end_date)
+
+            if not results:
+                await update.message.reply_text("❌ No trades found")
+                return
+
+            msg = f"🔥 RANGE RESULT - {stock}\n\n"
+
+            for r in results:
+                msg += (
+                    f"{r['entry_time']}\n"
+                    f"Entry: {r['entry']} | SL: {r['sl']} | Target: {r['target']}\n"
+                    f"Result: {r['result']}\n\n"
+                )
+
+            await update.message.reply_text(msg)
+            return
+
+        except:
+            pass
+
+    # =========================================
+    # HELP MESSAGE
     # =========================================
 
     await update.message.reply_text(
         "Use:\n"
         "LIVE\n"
         "2026-04-06\n"
-        "BHEL 2026-04-06\n"
+        "VEDL 2026-04-27\n"
         "BHEL 2026-04-01 to 2026-04-20"
     )
+
 
 
 # =====================================================
