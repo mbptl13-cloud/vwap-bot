@@ -760,15 +760,18 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # START BOT
 # =====================================================
 
+# =====================================================
+# START BOT
+# =====================================================
+
 async def main():
     print("BOT RUNNING...")
 
+    # Flask keep alive for Render free plan
     keep_alive()
 
-    app = ApplicationBuilder().token(
-        BOT_TOKEN
-    ).build()
-
+    # Telegram bot start
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(
         MessageHandler(
@@ -777,9 +780,15 @@ async def main():
         )
     )
 
+    print("TELEGRAM BOT STARTING...")
+
     await app.initialize()
     await app.start()
-    await app.updater.start_polling()
+    await app.updater.start_polling(
+        drop_pending_updates=True
+    )
+
+    print("TELEGRAM BOT STARTED SUCCESSFULLY")
 
     while True:
         await asyncio.sleep(3600)
@@ -787,3 +796,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
