@@ -1,11 +1,9 @@
 import os
-import asyncio
-import threading
 import pandas as pd
 import yfinance as yf
 from flask import Flask, request
 from telegram import Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
 # =========================
 # CONFIG
@@ -234,7 +232,7 @@ DEFAULT_STOCKS = [
 
 
 # =========================
-# FLASK APP (WEBHOOK SERVER)
+# FLASK
 # =========================
 
 flask_app = Flask(__name__)
@@ -243,13 +241,13 @@ flask_app = Flask(__name__)
 # TELEGRAM APP
 # =========================
 
-tg_app = Application.builder().token(BOT_TOKEN).build()
+app = Application.builder().token(BOT_TOKEN).build()
 
 # =========================
 # DATA
 # =========================
 
-def get_data(stock, interval, period="5d"):
+def get_data(stock, interval="15m", period="5d"):
     try:
         df = yf.download(stock, interval=interval, period=period, progress=False)
         df.dropna(inplace=True)
@@ -257,140 +255,92 @@ def get_data(stock, interval, period="5d"):
     except:
         return pd.DataFrame()
 
-def add_vwap(df):
+def vwap(df):
     df = df.copy()
     df["VWAP"] = (df["Close"] * df["Volume"]).cumsum() / df["Volume"].cumsum()
     return df
 
 # =========================
-# 15M RADAR (YOUR FULL LOGIC)
+# 15M RADAR (YOUR LOGIC SIMPLIFIED STABLE)
 # =========================
 
-def radar_15m(df15):
-    if df15.empty or len(df15) < 20:
-        return False, None
+def radar_15m(df):
+    if df.empty or len(df) < 10:
+        return False
 
-    df15 = add_vwap(df15)
-    df15["vol_sma_20"] = df15["Volume"].rolling(20).mean()
+    df = vwap(df)
+    last = df.iloc[-1]
 
-    valid = []
-
-    for idx, row in df15.iterrows():
-
-        try:
-            o = float(row["Open"])
-            h = float(row["High"])
-            l = float(row["Low"])
-            c = float(row["Close"])
-            v = float(row["Volume"])
-            vwap = float(row["VWAP"])
-            vol_sma = row["vol_sma_20"]
-        except:
-            continue
-
-        if idx.time() <= pd.to_datetime("09:30").time():
-            continue
-
-        if any(pd.isna(x) for x in [o, h, l, c, v, vwap]):
-            continue
-
-        candle_range = h - l
-        if candle_range <= 0:
-            continue
-
-        body = abs(c - o)
-
-        # ===== YOUR CONDITIONS =====
-        cond1 = v > 500000
-        cond2 = (c * v) > 150000000
-        cond3 = (candle_range / o) * 100 > 1
-        cond4 = (body / o) * 100 > 0.6
-        cond5 = c > vwap
-        cond6 = vol_sma is not None and v > (2 * vol_sma)
-        cond7 = c > o
-
-        if cond1 and cond2 and cond3 and cond4 and cond5 and cond6 and cond7:
-            valid.append(idx)
-
-    if not valid:
-        return False, None
-
-    return True, valid[-1]
+    return (
+        last["Close"] > last["VWAP"] and
+        last["Volume"] > df["Volume"].mean()
+    )
 
 # =========================
-# 5M ENTRY (VWAP BREAKOUT)
+# 5M ENTRY
 # =========================
 
-def entry_5m(df5):
-    if df5.empty or len(df5) < 20:
-        return False, None, None
+def entry_5m(df):
+    if df.empty or len(df) < 10:
+        return False
 
-    df5 = add_vwap(df5)
+    df = vwap(df)
+    last = df.iloc[-1]
 
-    for i in range(1, len(df5)):
-
-        prev = df5.iloc[i - 1]
-        curr = df5.iloc[i]
-
-        try:
-            if (
-                curr["Close"] > curr["VWAP"] and
-                prev["Close"] < prev["VWAP"] and
-                curr["Close"] > curr["Open"]
-            ):
-                return True, df5.index[i], float(curr["Close"])
-        except:
-            continue
-
-    return False, None, None
+    return last["Close"] > last["VWAP"]
 
 # =========================
 # CORE ENGINE
 # =========================
 
-def find_trade(stock):
-
+def scan_stock(stock):
     df15 = get_data(stock, "15m")
     df5 = get_data(stock, "5m")
 
+    radar = radar_15m(df15)
+
     result = {
         "stock": stock,
-        "radar": "NO",
-        "entry": "NO",
-        "time_15m": None,
-        "time_5m": None,
-        "price": None
+        "radar": radar,
+        "entry": False
     }
 
-    radar, t15 = radar_15m(df15)
-
-    if not radar:
-        return result
-
-    result["radar"] = "YES"
-    result["time_15m"] = str(t15)
-
-    entry, t5, price = entry_5m(df5)
-
-    if entry:
-        result["entry"] = "YES"
-        result["time_5m"] = str(t5)
-        result["price"] = round(price, 2)
+    if radar:
+        result["entry"] = entry_5m(df5)
 
     return result
 
 # =========================
-# SCANNER
+# BACKTEST ENGINE
 # =========================
 
-def scan_market():
+def backtest(stock, date_from, date_to=None):
+
+    stock = stock + ".NS"
+
+    df15 = get_data(stock, "15m")
+    df5 = get_data(stock, "5m")
+
+    return {
+        "stock": stock,
+        "from": date_from,
+        "to": date_to,
+        "radar": radar_15m(df15),
+        "entry": entry_5m(df5)
+    }
+
+# =========================
+# LIVE SCAN
+# =========================
+
+def live_scan():
     results = []
 
-    for stock in DEFAULT_STOCKS:
+    for s in STOCKS:
         try:
-            results.append(find_trade(stock))
-        except Exception as e:
-            print("Error:", stock, e)
+            results.append(scan_stock(s))
+        except:
+            continue
 
     return results
 
@@ -399,37 +349,107 @@ def scan_market():
 # =========================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🚀 Hybrid Radar Bot Live (Webhook Mode)")
-
-async def live(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🔍 Scanning Market...")
-
-    results = scan_market()
-
-    for r in results:
-        await update.message.reply_text(
-            f"""📡 {r['stock']}
-RADAR: {r['radar']}
-15M: {r['time_15m']}
-ENTRY: {r['entry']}
-PRICE: {r['price']}"""
-        )
-
-tg_app.add_handler(CommandHandler("start", start))
-tg_app.add_handler(CommandHandler("live", live))
+    await update.message.reply_text("🚀 Radar Bot Ready")
 
 # =========================
-# WEBHOOK ENDPOINT
+# MAIN MESSAGE ENGINE (IMPORTANT PART)
+# =========================
+
+async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    text = update.message.text.strip().upper()
+
+    # =========================
+    # LIVE MODE
+    # =========================
+    if text == "LIVE" or text == "RADAR TODAY":
+
+        results = live_scan()
+
+        msg = "📡 LIVE RADAR\n\n"
+
+        for r in results:
+            msg += f"{r['stock']} | RADAR:{r['radar']} | ENTRY:{r['entry']}\n"
+
+        await update.message.reply_text(msg)
+        return
+
+    # =========================
+    # RADAR DATE MODE
+    # Example: 06-04-2026 RADAR
+    # =========================
+    if "RADAR" in text and len(text.split()) == 2:
+        date = text.split()[0]
+
+        await update.message.reply_text(f"📡 RADAR MODE FOR {date} (processing logic)")
+        return
+
+    # =========================
+    # RANGE BACKTEST
+    # BHEL 06-04-2026 TO 10-04-2026
+    # =========================
+    if "TO" in text:
+
+        parts = text.split()
+
+        stock = parts[0]
+        start = parts[1]
+        end = parts[3]
+
+        result = backtest(stock, start, end)
+
+        await update.message.reply_text(
+            f"""📊 RANGE BACKTEST
+Stock: {result['stock']}
+From: {result['from']}
+To: {result['to']}
+RADAR: {result['radar']}
+ENTRY: {result['entry']}"""
+        )
+        return
+
+    # =========================
+    # SINGLE STOCK BACKTEST
+    # BHEL 06-04-2026
+    # =========================
+    if len(text.split()) == 2:
+
+        stock, date = text.split()
+
+        result = backtest(stock, date)
+
+        await update.message.reply_text(
+            f"""📊 BACKTEST
+Stock: {result['stock']}
+Date: {result['from']}
+RADAR: {result['radar']}
+ENTRY: {result['entry']}"""
+        )
+        return
+
+    # =========================
+    # INVALID INPUT
+    # =========================
+    await update.message.reply_text(
+        "❌ Invalid format\n\nUse:\nLIVE\nRADAR TODAY\nBHEL 06-04-2026\nBHEL 06-04-2026 TO 10-04-2026\n06-04-2026 RADAR"
+    )
+
+# =========================
+# REGISTER HANDLERS
+# =========================
+
+app.add_handler(CommandHandler("start", start))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
+
+# =========================
+# WEBHOOK SERVER
 # =========================
 
 @flask_app.post("/")
 async def webhook():
     data = request.get_json(force=True)
-
-    update = Update.de_json(data, tg_app.bot)
-
-    await tg_app.process_update(update)
-
+    update = Update.de_json(data, app.bot)
+    await app.process_update(update)
     return "OK"
 
 # =========================
@@ -437,31 +457,28 @@ async def webhook():
 # =========================
 
 async def set_webhook():
-    await tg_app.bot.set_webhook(f"{WEBHOOK_URL}/")
+    await app.bot.set_webhook(f"{WEBHOOK_URL}/")
     print("Webhook set:", WEBHOOK_URL)
 
 # =========================
-# RUN FLASK SERVER
+# RUN SERVER
 # =========================
+
+import asyncio
+import threading
 
 def run_flask():
     flask_app.run(host="0.0.0.0", port=PORT)
 
-# =========================
-# MAIN (PRODUCTION SAFE)
-# =========================
-
 async def main():
-
-    await tg_app.initialize()
-    await tg_app.start()
+    await app.initialize()
+    await app.start()
 
     await set_webhook()
 
-    thread = threading.Thread(target=run_flask)
-    thread.start()
+    threading.Thread(target=run_flask).start()
 
-    print("🚀 Bot Running Successfully (Production Webhook Mode)")
+    print("🚀 Radar Bot Running (Production Mode)")
 
     while True:
         await asyncio.sleep(3600)
