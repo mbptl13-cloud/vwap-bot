@@ -1,4 +1,6 @@
 import os
+import asyncio
+import threading
 import pandas as pd
 import yfinance as yf
 from flask import Flask, request
@@ -10,10 +12,10 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 # =========================
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8689896067:AAEuHnXG8f7orhfygCKvHoDItQmJTqzGGB4")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://your-app.onrender.com")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://vwap-bot-ia6r.onrender.com")
 PORT = int(os.getenv("PORT", 10000))
 
-DEFAULT_STOCKS = [
+STOCKS = [
     
     "360ONE.NS",
     "ABB.NS",
@@ -232,7 +234,7 @@ DEFAULT_STOCKS = [
 
 
 # =========================
-# FLASK
+# FLASK APP
 # =========================
 
 flask_app = Flask(__name__)
@@ -244,7 +246,7 @@ flask_app = Flask(__name__)
 app = Application.builder().token(BOT_TOKEN).build()
 
 # =========================
-# DATA
+# DATA ENGINE
 # =========================
 
 def get_data(stock, interval="15m", period="5d"):
@@ -261,7 +263,7 @@ def vwap(df):
     return df
 
 # =========================
-# 15M RADAR (YOUR LOGIC SIMPLIFIED STABLE)
+# 15M RADAR LOGIC
 # =========================
 
 def radar_15m(df):
@@ -277,7 +279,7 @@ def radar_15m(df):
     )
 
 # =========================
-# 5M ENTRY
+# 5M ENTRY LOGIC
 # =========================
 
 def entry_5m(df):
@@ -290,57 +292,25 @@ def entry_5m(df):
     return last["Close"] > last["VWAP"]
 
 # =========================
-# CORE ENGINE
+# SCAN ENGINE
 # =========================
 
-def scan_stock(stock):
-    df15 = get_data(stock, "15m")
-    df5 = get_data(stock, "5m")
-
-    radar = radar_15m(df15)
-
-    result = {
-        "stock": stock,
-        "radar": radar,
-        "entry": False
-    }
-
-    if radar:
-        result["entry"] = entry_5m(df5)
-
-    return result
-
-# =========================
-# BACKTEST ENGINE
-# =========================
-
-def backtest(stock, date_from, date_to=None):
-
-    stock = stock + ".NS"
-
-    df15 = get_data(stock, "15m")
-    df5 = get_data(stock, "5m")
-
-    return {
-        "stock": stock,
-        "from": date_from,
-        "to": date_to,
-        "radar": radar_15m(df15),
-        "entry": entry_5m(df5)
-    }
-
-# =========================
-# LIVE SCAN
-# =========================
-
-def live_scan():
+def scan_market():
     results = []
 
     for s in STOCKS:
         try:
-            results.append(scan_stock(s))
-        except:
-            continue
+            df15 = get_data(s, "15m")
+            df5 = get_data(s, "5m")
+
+            results.append({
+                "stock": s,
+                "radar": radar_15m(df15),
+                "entry": entry_5m(df5)
+            })
+
+        except Exception as e:
+            print("Error:", s, e)
 
     return results
 
@@ -349,138 +319,88 @@ def live_scan():
 # =========================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🚀 Radar Bot Ready")
+    await update.message.reply_text("🚀 Radar Bot Live")
+
+async def live(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🔍 Scanning...")
+
+    results = scan_market()
+
+    msg = "📡 LIVE RADAR\n\n"
+
+    for r in results:
+        msg += f"{r['stock']} | RADAR:{r['radar']} | ENTRY:{r['entry']}\n"
+
+    await update.message.reply_text(msg)
 
 # =========================
-# MAIN MESSAGE ENGINE (IMPORTANT PART)
+# MESSAGE HANDLER (optional future expansion)
 # =========================
 
-async def message_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    text = update.message.text.strip().upper()
-
-    # =========================
-    # LIVE MODE
-    # =========================
-    if text == "LIVE" or text == "RADAR TODAY":
-
-        results = live_scan()
-
-        msg = "📡 LIVE RADAR\n\n"
-
-        for r in results:
-            msg += f"{r['stock']} | RADAR:{r['radar']} | ENTRY:{r['entry']}\n"
-
-        await update.message.reply_text(msg)
-        return
-
-    # =========================
-    # RADAR DATE MODE
-    # Example: 06-04-2026 RADAR
-    # =========================
-    if "RADAR" in text and len(text.split()) == 2:
-        date = text.split()[0]
-
-        await update.message.reply_text(f"📡 RADAR MODE FOR {date} (processing logic)")
-        return
-
-    # =========================
-    # RANGE BACKTEST
-    # BHEL 06-04-2026 TO 10-04-2026
-    # =========================
-    if "TO" in text:
-
-        parts = text.split()
-
-        stock = parts[0]
-        start = parts[1]
-        end = parts[3]
-
-        result = backtest(stock, start, end)
-
-        await update.message.reply_text(
-            f"""📊 RANGE BACKTEST
-Stock: {result['stock']}
-From: {result['from']}
-To: {result['to']}
-RADAR: {result['radar']}
-ENTRY: {result['entry']}"""
-        )
-        return
-
-    # =========================
-    # SINGLE STOCK BACKTEST
-    # BHEL 06-04-2026
-    # =========================
-    if len(text.split()) == 2:
-
-        stock, date = text.split()
-
-        result = backtest(stock, date)
-
-        await update.message.reply_text(
-            f"""📊 BACKTEST
-Stock: {result['stock']}
-Date: {result['from']}
-RADAR: {result['radar']}
-ENTRY: {result['entry']}"""
-        )
-        return
-
-    # =========================
-    # INVALID INPUT
-    # =========================
-    await update.message.reply_text(
-        "❌ Invalid format\n\nUse:\nLIVE\nRADAR TODAY\nBHEL 06-04-2026\nBHEL 06-04-2026 TO 10-04-2026\n06-04-2026 RADAR"
-    )
+async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Use /live for scanning")
 
 # =========================
 # REGISTER HANDLERS
 # =========================
 
 app.add_handler(CommandHandler("start", start))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, message_handler))
+app.add_handler(CommandHandler("live", live))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
 
 # =========================
-# WEBHOOK SERVER
+# FLASK WEBHOOK (IMPORTANT FIX)
 # =========================
 
 @flask_app.post("/")
-async def webhook():
-    data = request.get_json(force=True)
-    update = Update.de_json(data, app.bot)
-    await app.process_update(update)
-    return "OK"
+def webhook():
+    try:
+        data = request.get_json(force=True)
+
+        update = Update.de_json(data, app.bot)
+
+        asyncio.run(app.process_update(update))
+
+        return "OK"
+    except Exception as e:
+        print("Webhook error:", e)
+        return "ERROR"
 
 # =========================
-# SET WEBHOOK
+# HEALTH CHECK ROUTE
+# =========================
+
+@flask_app.get("/")
+def home():
+    return "BOT IS RUNNING"
+
+# =========================
+# SET WEBHOOK PROPERLY
 # =========================
 
 async def set_webhook():
-    await app.bot.delete_webhook(drop_pending_updates=True)
-    await app.bot.set_webhook(url=f"{WEBHOOK_URL}/")
-    print("Webhook RESET DONE:", WEBHOOK_URL)
+    await app.initialize()
+    await app.start()
 
+    await app.bot.delete_webhook(drop_pending_updates=True)
+    await app.bot.set_webhook(f"{WEBHOOK_URL}/")
+
+    print("✅ Webhook SET:", WEBHOOK_URL)
 
 # =========================
 # RUN SERVER
 # =========================
 
-import asyncio
-import threading
-
 def run_flask():
     flask_app.run(host="0.0.0.0", port=PORT)
 
 async def main():
-    await app.initialize()
-    await app.start()
-
     await set_webhook()
 
-    threading.Thread(target=run_flask).start()
+    thread = threading.Thread(target=run_flask)
+    thread.start()
 
-    print("🚀 Radar Bot Running (Production Mode)")
+    print("🚀 Bot Running (PRODUCTION MODE)")
 
     while True:
         await asyncio.sleep(3600)
