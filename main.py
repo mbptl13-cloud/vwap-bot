@@ -1,34 +1,17 @@
 import os
 import re
+import time
+import hashlib
 import requests
 import pandas as pd
 import yfinance as yf
-import pytz  # (optional but safe)
-
-def to_ist(df):
-    if df is None:
-        return None
-
-    df = df.copy()
-    df.index = pd.to_datetime(df.index)
-
-    try:
-        if df.index.tz is None:
-            df.index = df.index.tz_localize("UTC")
-
-        df.index = df.index.tz_convert("Asia/Kolkata")
-
-    except:
-        pass
-
-    return df
 from flask import Flask, request
 
 # =========================
 # CONFIG
 # =========================
 
-BOT_TOKEN = "8689896067:AAEuHnXG8f7orhfygCKvHoDItQmJTqzGGB4"
+BOT_TOKEN = "8689896067:AAEuHnXG8f7orhfygCKvHoDItQmJTqzGGB4
 RENDER_URL = "https://vwap-bot-ia6r.onrender.com"
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 PORT = int(os.environ.get("PORT", 10000))
@@ -36,14 +19,21 @@ PORT = int(os.environ.get("PORT", 10000))
 app = Flask(__name__)
 
 # =========================
-# STATE
+# ANTI LOOP CONTROL (IMPORTANT)
+# =========================
+
+LAST_UPDATE_ID = set()
+SCAN_LOCK = False
+
+# =========================
+# STATE MEMORY
 # =========================
 
 RADAR_STATE = {}
 TRADED_TODAY = set()
 
 # =========================
-# STOCK LIST (keep full list here)
+# STOCK LIST
 # =========================
 
 FNO_STOCKS = [
@@ -79,13 +69,35 @@ def set_webhook():
         print("Webhook error:", e)
 
 # =========================
+# TIMEZONE FIX (IST)
+# =========================
+
+def to_ist(df):
+    if df is None:
+        return None
+
+    df = df.copy()
+    df.index = pd.to_datetime(df.index)
+
+    try:
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("UTC")
+
+        df.index = df.index.tz_convert("Asia/Kolkata")
+    except:
+        pass
+
+    return df
+
+# =========================
 # DATA ENGINE
 # =========================
 
-def get_data(symbol, interval, period="5d"):
-    df = yf.download(symbol, interval=interval, period=period, progress=False)
+def get_data(symbol, interval):
+    df = yf.download(symbol, interval=interval, period="5d", progress=False)
     if df is None or df.empty:
         return None
+
     df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
     return df.dropna()
 
@@ -104,16 +116,16 @@ def check_15m(df):
 
     for i in range(20, len(df)):
         c = df.iloc[i]
-        open_p = c["Open"]
+        op = c["Open"]
 
-        if open_p <= 0:
+        if op <= 0:
             continue
 
         cond = (
             c["Volume"] > 500000 and
             c["Volume"] * c["Close"] > 150000000 and
-            ((c["High"] - c["Low"]) / open_p) * 100 > 0.6 and
-            (abs(c["Close"] - c["Open"]) / open_p) * 100 > 0.6 and
+            ((c["High"] - c["Low"]) / op) * 100 > 0.6 and
+            (abs(c["Close"] - c["Open"]) / op) * 100 > 0.6 and
             c["Close"] > c["VWAP"] and
             c["Volume"] > 2 * c["VOL_SMA20"] and
             c["Close"] > c["Open"]
@@ -167,10 +179,7 @@ def check_5m(df, radar_time):
 # =========================
 
 def scan_stock(symbol):
-    if symbol in TRADED_TODAY:
-        return None
-
-    df15 = to_list(get_data(symbol, "15m"))
+    df15 = to_ist(get_data(symbol, "15m"))
     if df15 is None:
         return None
 
@@ -178,13 +187,8 @@ def scan_stock(symbol):
     if not radar:
         return None
 
-    RADAR_STATE[symbol] = radar
-
-    df5 = to_get(get_data(symbol, "5m"))
+    df5 = to_ist(get_data(symbol, "5m"))
     trade = check_5m(df5, radar["time"]) if df5 is not None else None
-
-    if trade:
-        TRADED_TODAY.add(symbol)
 
     return {
         "symbol": symbol,
@@ -193,33 +197,28 @@ def scan_stock(symbol):
     }
 
 # =========================
-# FULL SCAN
+# SCAN ALL (ANTI LOCK)
 # =========================
 
 def scan_all():
+    global SCAN_LOCK
+
+    if SCAN_LOCK:
+        return []
+
+    SCAN_LOCK = True
+
     results = []
     for s in FNO_STOCKS:
         r = scan_stock(s)
         if r:
             results.append(r)
+
+    SCAN_LOCK = False
     return results
 
 # =========================
-# BACKTEST SINGLE STOCK
-# =========================
-
-def backtest_stock(symbol, date):
-    return scan_stock(symbol)
-
-# =========================
-# BACKTEST RANGE (SIMPLIFIED)
-# =========================
-
-def backtest_range(symbol, start, end):
-    return [scan_stock(symbol)]
-
-# =========================
-# FORMAT RESULT
+# FORMAT
 # =========================
 
 def format_result(r):
@@ -230,9 +229,25 @@ def format_result(r):
         t = r["trade"]
         msg += f"5M: {t['time']}\nEntry: {t['entry']} SL: {t['sl']} TG: {t['target']}\n"
     else:
-        msg += "RADAR ACTIVE (waiting 5M)\n"
+        msg += "RADAR ACTIVE\n"
 
     return msg
+
+# =========================
+# ANTI DUPLICATE UPDATE
+# =========================
+
+def is_duplicate(update_id):
+    if update_id in LAST_UPDATE_ID:
+        return True
+
+    LAST_UPDATE_ID.add(update_id)
+
+    # prevent memory overflow
+    if len(LAST_UPDATE_ID) > 5000:
+        LAST_UPDATE_ID.clear()
+
+    return False
 
 # =========================
 # WEBHOOK
@@ -242,20 +257,24 @@ def format_result(r):
 def webhook():
     data = request.get_json(force=True)
 
+    update_id = data.get("update_id")
+    if update_id and is_duplicate(update_id):
+        return "ok"
+
     if "message" not in data:
         return "ok"
 
     msg = data["message"]
     chat_id = msg["chat"]["id"]
-    text = msg.get("text", "").upper().strip()
+    text = msg.get("text", "").strip().upper()
 
     print("CMD:", text)
 
     # =========================
-    # 1 LIVE
+    # LIVE
     # =========================
     if text == "LIVE":
-        send(chat_id, "📡 LIVE SCANNING FNO...")
+        send(chat_id, "📡 LIVE SCANNING STARTED")
         results = scan_all()
 
         for r in results:
@@ -264,10 +283,10 @@ def webhook():
         return "ok"
 
     # =========================
-    # 2 RADAR TODAY
+    # RADAR TODAY
     # =========================
     if text == "RADAR TODAY":
-        send(chat_id, "📊 RADAR ONLY SCAN...")
+        send(chat_id, "📊 RADAR SCAN")
         results = scan_all()
 
         for r in results:
@@ -277,10 +296,10 @@ def webhook():
         return "ok"
 
     # =========================
-    # 3 DATE (FULL SCAN)
+    # DATE
     # =========================
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
-        send(chat_id, f"📅 SCANNING FULL FNO FOR {text}")
+        send(chat_id, f"📅 SCANNING {text}")
         results = scan_all()
 
         for r in results:
@@ -289,15 +308,13 @@ def webhook():
         return "ok"
 
     # =========================
-    # 4 STOCK + DATE
+    # STOCK DATE
     # =========================
     if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2}", text):
         sym, date = text.split()
-        symbol = sym + ".NS"
+        send(chat_id, f"📊 SCANNING {sym}")
 
-        send(chat_id, f"📊 SCANNING {symbol}")
-
-        r = scan_stock(symbol)
+        r = scan_stock(sym + ".NS")
         if r:
             send(chat_id, format_result(r))
         else:
@@ -306,31 +323,14 @@ def webhook():
         return "ok"
 
     # =========================
-    # 5 STOCK RANGE
+    # RANGE
     # =========================
-    if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2} TO \d{4}-\d{2}-\d{2}", text):
-        parts = text.split()
-        symbol = parts[0] + ".NS"
+    if "TO" in text and re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2} TO \d{4}-\d{2}-\d{2}", text):
+        send(chat_id, "📅 RANGE SCAN")
+        r = scan_all()
 
-        send(chat_id, f"📅 RANGE SCAN {symbol}")
-
-        results = backtest_range(symbol, parts[1], parts[3])
-
-        for r in results:
-            send(chat_id, format_result(r))
-
-        return "ok"
-
-    # =========================
-    # 6 DATE RADAR ONLY
-    # =========================
-    if text.endswith("RADAR") and re.fullmatch(r"\d{4}-\d{2}-\d{2} RADAR", text):
-        send(chat_id, "📡 RADAR ONLY MODE")
-
-        results = scan_all()
-        for r in results:
-            if r.get("radar"):
-                send(chat_id, f"{r['symbol']} → {r['radar']['time']}")
+        for x in r:
+            send(chat_id, format_result(x))
 
         return "ok"
 
@@ -346,14 +346,14 @@ def webhook():
 
 @app.route("/")
 def home():
-    return "BOT RUNNING"
+    return "BOT V5 RUNNING"
 
 # =========================
 # START
 # =========================
 
 if __name__ == "__main__":
-    print("🚀 BOT V3 STARTED")
+    print("🚀 ANTI-LOOP V5 STARTED")
 
     set_webhook()
 
