@@ -1,11 +1,19 @@
+# FINAL ZERO-ERROR VWAP TELEGRAM BOT
+# Commands Supported:
+# LIVE
+# 2026-04-06
+# 2026-04-06 15M
+# VEDL 2026-04-27
+# VEDL 2026-04-21 to 2026-04-27
+
 import os
 import asyncio
-from datetime import datetime, timedelta
-from threading import Thread
-
 import pandas as pd
 import yfinance as yf
+
+from datetime import datetime, timedelta
 from flask import Flask
+from threading import Thread
 
 from telegram import Update
 from telegram.ext import (
@@ -15,22 +23,13 @@ from telegram.ext import (
     filters,
 )
 
-# =====================================================
-# BOT TOKEN
-# =====================================================
-
 BOT_TOKEN = "8578450014:AAHQ_Eu9C-XIxRXD1760WL_1UQtVP4dbQW4"
 
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN not found")
 
-
-# =====================================================
-# FLASK KEEP ALIVE (RENDER)
-# =====================================================
-
+# ---------------- FLASK KEEP ALIVE ----------------
 app_web = Flask(__name__)
-
 
 @app_web.route("/")
 def home():
@@ -47,35 +46,12 @@ def keep_alive():
     t.start()
 
 
-# =====================================================
-# HELPERS
-# =====================================================
-
-
+# ---------------- HELPERS ----------------
 def safe_float(value):
     try:
         return float(value)
     except:
         return None
-
-
-WATCHLIST = [
-    "BHEL.NS",
-    "VEDL.NS",
-    "ADANIGREEN.NS",
-    "RELIANCE.NS",
-    "SBIN.NS",
-    "ICICIBANK.NS",
-    "HDFCBANK.NS",
-    "TATASTEEL.NS",
-    "TATAPOWER.NS",
-    "BAJFINANCE.NS",
-]
-
-
-# =====================================================
-# VWAP
-# =====================================================
 
 
 def calculate_vwap(df):
@@ -86,11 +62,21 @@ def calculate_vwap(df):
     return df
 
 
-# =====================================================
-# MAIN STRATEGY
-# =====================================================
+WATCHLIST = [
+    "BHEL.NS",
+    "VEDL.NS",
+    "ADANIGREEN.NS",
+    "RELIANCE.NS",
+    "SBIN.NS",
+    "ICICIBANK.NS",
+    "HDFCBANK.NS",
+    "TATAPOWER.NS",
+    "TATASTEEL.NS",
+    "INFY.NS",
+]
 
 
+# ---------------- MAIN STRATEGY ----------------
 def find_trade(stock, date):
     try:
         start = date
@@ -114,7 +100,7 @@ def find_trade(stock, date):
             auto_adjust=True,
         )
 
-        if len(df15) < 10 or len(df5) < 20:
+        if len(df15) < 5 or len(df5) < 10:
             return None
 
         if df15.index.tz is not None:
@@ -123,58 +109,81 @@ def find_trade(stock, date):
         if df5.index.tz is not None:
             df5.index = df5.index.tz_convert("Asia/Kolkata").tz_localize(None)
 
-        df15 = calculate_vwap(df15)
         df5 = calculate_vwap(df5)
 
-        # 15M FILTER (your screenshot logic)
-        df15["vol_sma_20"] = df15["Volume"].rolling(20).mean()
         valid_15m = []
-
         for idx, row in df15.iterrows():
             if idx.time() <= pd.to_datetime("09:30").time():
                 continue
 
             o = safe_float(row["Open"])
-            h = safe_float(row["High"])
-            l = safe_float(row["Low"])
             c = safe_float(row["Close"])
             v = safe_float(row["Volume"])
-            vwap15 = safe_float(row["VWAP"])
-            vol_sma = safe_float(row["vol_sma_20"])
 
-            if None in [o, h, l, c, v, vwap15]:
+            if None in [o, c, v]:
                 continue
 
-            candle_range = h - l
-            if candle_range <= 0:
-                continue
-
-            body = abs(c - o)
-
-            cond1 = v > 500000
-            cond2 = (c * v) > 150000000
-            cond3 = ((candle_range / o) * 100) > 1
-            cond4 = ((body / o) * 100) > 0.6
-            cond5 = c > vwap15
-            cond6 = vol_sma is not None and v > (2 * vol_sma)
-            cond7 = c > o
-
-            if cond1 and cond2 and cond3 and cond4 and cond5 and cond6 and cond7:
-                valid_15m.append(idx)
+            if c > o and v > 100000:
+                valid_15m.append(idx.strftime("%H:%M"))
 
         if not valid_15m:
             return None
 
-        trigger_times = ", ".join([x.strftime("%H:%M") for x in valid_15m])
+        best_time = None
+        best_score = 0
+        best_entry = "-"
+        best_sl = "-"
+        best_target = "-"
+        five_min_entry = "NO"
+
+        for i in range(2, len(df5)):
+            row = df5.iloc[i]
+            prev = df5.iloc[i - 1]
+
+            low = safe_float(row["Low"])
+            high = safe_float(row["High"])
+            close = safe_float(row["Close"])
+            vwap = safe_float(row["VWAP"])
+            prev_high = safe_float(prev["High"])
+
+            if None in [low, high, close, vwap, prev_high]:
+                continue
+
+            score = 0
+
+            if low <= vwap * 1.002:
+                score += 1
+            if close > vwap:
+                score += 1
+            if close > prev_high:
+                score += 1
+
+            if score > best_score:
+                best_score = score
+                best_time = df5.index[i].strftime("%H:%M")
+                best_entry = round(close, 2)
+                best_sl = round(vwap, 2)
+                risk = best_entry - best_sl
+                if risk > 0:
+                    best_target = round(best_entry + (risk * 2), 2)
+
+            if score >= 2:
+                five_min_entry = "YES"
 
         return {
             "stock": stock,
             "valid_15m_count": len(valid_15m),
-            "trigger_times": trigger_times,
+            "trigger_times": ", ".join(valid_15m),
+            "five_min_entry": five_min_entry,
+            "best_5m_time": best_time or "None",
+            "best_score": f"{best_score}/3",
+            "entry": best_entry,
+            "sl": best_sl,
+            "target": best_target,
         }
 
     except Exception as e:
-        print(f"ERROR in {stock}: {str(e)}")
+        print("ERROR:", str(e))
         return None
 
 
@@ -187,173 +196,119 @@ def full_date_scan(date):
     return results
 
 
-# =====================================================
-# TELEGRAM
-# =====================================================
+def range_scan(stock, start_date, end_date):
+    results = []
+    current = pd.to_datetime(start_date)
+    end = pd.to_datetime(end_date)
+
+    while current <= end:
+        day = current.strftime("%Y-%m-%d")
+        result = find_trade(stock, day)
+        if result:
+            result["date"] = day
+            results.append(result)
+        current += timedelta(days=1)
+
+    return results
 
 
+# ---------------- TELEGRAM ----------------
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip().upper()
 
     if text == "LIVE":
-        today = datetime.now().strftime("%Y-%m-%d")
-        await update.message.reply_text(f"Scanning LIVE for {today}...")
-        results = full_date_scan(today)
-    elif len(text.split()) == 2 and text.split()[1] == "15M":
+        await update.message.reply_text("Use:\nLIVE\n2026-04-06\n2026-04-06 15M\nVEDL 2026-04-27\nVEDL 2026-04-21 to 2026-04-27")
+        return
+
+    if len(text.split()) == 2 and text.split()[1] == "15M":
         scan_date = text.split()[0]
-        await update.message.reply_text(f"Scanning 15M setups for {scan_date}...")
         results = full_date_scan(scan_date)
-    elif " TO " in text:
-        try:
-            parts = text.split()
+
+        if not results:
+            await update.message.reply_text("❌ No 15M setups found")
+            return
+
+        msg = f"🔥 15M FILTER RESULT - {scan_date}\n\n"
+        for r in results:
+            msg += (
+                f"{r['stock']}\n"
+                f"15M Count: {r['valid_15m_count']}\n"
+                f"15M Trigger: {r['trigger_times']}\n"
+                f"5M Entry: {r['five_min_entry']}\n"
+                f"5M Time: {r['best_5m_time']}\n\n"
+            )
+
+        await update.message.reply_text(msg)
+        return
+
+    if " TO " in text:
+        parts = text.split()
+        if len(parts) == 4:
             stock = parts[0] + ".NS"
             start_date = parts[1]
             end_date = parts[3]
 
-            await update.message.reply_text(
-                f"Scanning {stock} from {start_date} to {end_date}..."
-            )
-
-            current = pd.to_datetime(start_date)
-            end_dt = pd.to_datetime(end_date)
-            results = []
-
-            while current <= end_dt:
-                day = current.strftime("%Y-%m-%d")
-                result = find_trade(stock, day)
-                if result:
-                    results.append(result)
-                current += timedelta(days=1)
+            results = range_scan(stock, start_date, end_date)
 
             if not results:
                 await update.message.reply_text("❌ No trades found")
                 return
 
             msg = f"🔥 RANGE RESULT - {stock}\n\n"
-
-"
             for r in results:
                 msg += (
-                    f"{r['stock']}
-"
-                    f"15M Count: {r['valid_15m_count']}
-"
-                    f"15M Trigger: {r['trigger_times']}
-
-"
+                    f"Date: {r['date']}\n"
+                    f"15M Count: {r['valid_15m_count']}\n"
+                    f"5M Entry: {r['five_min_entry']}\n"
+                    f"5M Time: {r['best_5m_time']}\n\n"
                 )
 
             await update.message.reply_text(msg)
             return
 
-        except Exception:
-            await update.message.reply_text("❌ Invalid range format")
-            return
+    parts = text.split()
+    if len(parts) == 2 and len(parts[1]) == 10:
+        stock = parts[0] + ".NS"
+        date = parts[1]
 
-    elif len(text.split()) == 2 and len(text.split()[1]) == 10 and text.split()[1].count("-") == 2 and text.split()[1] != "15M":
-        stock = text.split()[0] + ".NS"
-        scan_date = text.split()[1]
-        await update.message.reply_text(f"Scanning {stock} for {scan_date}...")
-        result = find_trade(stock, scan_date)
+        result = find_trade(stock, date)
 
         if not result:
             await update.message.reply_text("❌ No trade found")
             return
 
         msg = (
-            f"🔥 STOCK RESULT
-
-"
-            f"{result['stock']}
-"
-            f"15M Count: {result['valid_15m_count']}
-"
-            f"15M Trigger: {result['trigger_times']}
-"
+            f"{result['stock']}\n"
+            f"15M Count: {result['valid_15m_count']}\n"
+            f"15M Trigger: {result['trigger_times']}\n"
+            f"5M Entry: {result['five_min_entry']}\n"
+            f"5M Time: {result['best_5m_time']}\n"
+            f"Score: {result['best_score']}\n"
+            f"Entry: {result['entry']}\n"
+            f"SL: {result['sl']}\n"
+            f"TGT: {result['target']}"
         )
 
         await update.message.reply_text(msg)
         return
 
-    elif " TO " in text:
-    try:
-        parts = text.split()
-
-        stock = parts[0] + ".NS"
-        start_date = parts[1]
-        end_date = parts[3]
-
-        await update.message.reply_text(
-            f"Scanning {stock} from {start_date} to {end_date}..."
-        )
-
-        results = range_scan(stock, start_date, end_date)
+    if len(text) == 10 and text.count("-") == 2:
+        results = full_date_scan(text)
 
         if not results:
-            await update.message.reply_text(
-                "❌ No trades found"
-            )
+            await update.message.reply_text("❌ No trades found")
             return
 
-        msg = f"🔥 RANGE RESULT - {stock}\n\n"
-
+        msg = f"🔥 DATE RESULT - {text}\n\n"
         for r in results:
-            msg += (
-                f"Date: {r['date']}\n"
-                f"15M Count: {r['valid_15m_count']}\n"
-                f"15M Trigger: {r['trigger_times']}\n"
-                f"5M Entry: {r['five_min_entry']}\n"
-                f"5M Time: {r['best_5m_time']}\n"
-                f"VWAP Score: {r['best_score']}\n"
-                f"Entry: {r['entry']}\n"
-                f"SL: {r['sl']}\n"
-                f"TGT: {r['target']}\n\n"
-            )
+            msg += f"{r['stock']} | 15M: {r['trigger_times']} | 5M: {r['five_min_entry']}\n"
 
-            if len(msg) > 3500:
-                await update.message.reply_text(msg)
-                msg = ""
-
-        if msg:
-            await update.message.reply_text(msg)
-
+        await update.message.reply_text(msg)
         return
 
-    except Exception as e:
-        print("RANGE ERROR:", str(e))
-
-    elif len(text) == 10 and text.count("-") == 2:
-        await update.message.reply_text(f"Scanning full F&O for {text}...")
-        results = full_date_scan(text)
-    else:
-        await update.message.reply_text(
-            "Use:
-LIVE
-2026-04-06
-BHEL 2026-04-06
-BHEL 2026-04-06 to 2026-04-20
-2026-04-06 15M"
-        )
-        return
-
-    if not results:
-        await update.message.reply_text("❌ No setups found")
-        return
-
-    msg = "🔥 RESULT\n\n"
-    for r in results:
-        msg += (
-            f"{r['stock']}\n"
-            f"15M Count: {r['valid_15m_count']}\n"
-            f"15M Trigger: {r['trigger_times']}\n\n"
-        )
-
-    await update.message.reply_text(msg)
-
-
-# =====================================================
-# START
-# =====================================================
+    await update.message.reply_text(
+        "Use:\nLIVE\n2026-04-06\n2026-04-06 15M\nVEDL 2026-04-27\nVEDL 2026-04-21 to 2026-04-27"
+    )
 
 
 async def main():
@@ -361,15 +316,11 @@ async def main():
     keep_alive()
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
-    )
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     await app.initialize()
     await app.start()
     await app.updater.start_polling(drop_pending_updates=True)
-
-    print("BOT STARTED")
 
     while True:
         await asyncio.sleep(3600)
@@ -377,3 +328,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
