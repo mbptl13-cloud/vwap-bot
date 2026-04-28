@@ -230,6 +230,7 @@ async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =========================================================
 
 telegram_app = Application.builder().token(BOT_TOKEN).build()
+telegram_app.initialize()
 telegram_app.add_handler(CommandHandler("start", start))
 telegram_app.add_handler(MessageHandler(filters.TEXT, handle))
 
@@ -244,8 +245,13 @@ def webhook():
     data = request.get_json(force=True)
     update = Update.de_json(data, bot)
 
-    # SAFE DIRECT CALL (NO ASYNC WRAPPER)
-    asyncio.run(telegram_app.process_update(update))
+    # SAFE EXECUTION (NO Application lifecycle issues)
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    loop.run_until_complete(
+        telegram_app.process_update(update)
+    )
 
     return "ok"
 
