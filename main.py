@@ -457,8 +457,10 @@ async def webhook():
 # =========================
 
 async def set_webhook():
-    await app.bot.set_webhook(f"https://vwap-bot-ia6r.onrender.com/")
-    print("Webhook set:", WEBHOOK_URL)
+    await app.bot.delete_webhook(drop_pending_updates=True)
+    await app.bot.set_webhook(url=f"{WEBHOOK_URL}/")
+    print("Webhook RESET DONE:", WEBHOOK_URL)
+
 
 # =========================
 # RUN SERVER
