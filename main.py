@@ -223,7 +223,6 @@ DEFAULT_STOCKS = [
     "YESBANK.NS",
     "ZYDUSLIFE.NS"
 ]
-
 BOT_TOKEN = "8689896067:AAEEwtTtnagl6Djls_gkqW2lSY5Mo7GSpco"
 
 # =========================
