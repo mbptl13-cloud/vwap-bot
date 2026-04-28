@@ -12,7 +12,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 # =========================================================
 
 BOT_TOKEN = "8689896067:AAEuHnXG8f7orhfygCKvHoDItQmJTqzGGB4"
-url = "https://vwap-bot-ia6r.onrender.com"
+RENDER_URL = "https://vwap-bot-ia6r.onrender.com"
 PORT = int(os.environ.get("PORT", 10000))
 
 app = Flask(__name__)
