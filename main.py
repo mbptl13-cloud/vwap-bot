@@ -268,6 +268,7 @@ def get_data(stock, interval, start, end):
 # =====================================
 
 def radar_15m(df):
+    print("15M CHECK RUNNING")
     if df.empty or len(df) < 20:
         return False, None
 
