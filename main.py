@@ -9,7 +9,7 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 # CONFIG
 # =========================
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8689896067:AAEuHnXG8f7orhfygCKvHoDItQmJTqzGGB4" )
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://your-app.onrender.com")
 PORT = int(os.getenv("PORT", 10000))
 
