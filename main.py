@@ -259,8 +259,12 @@ def home():
 # =========================================================
 
 if __name__ == "__main__":
+    import os
+
+    port = int(os.environ.get("PORT", 10000))
+
     print("🚀 STARTING BOT v2")
 
     set_webhook()
 
-    app.run(host="0.0.0.0", port=PORT)
+    app.run(host="0.0.0.0", port=port)
