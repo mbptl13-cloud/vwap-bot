@@ -525,91 +525,19 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("No radar found today.")
         return
 
-    # COMMAND ORDER:
-# 1 LIVE
-# 2 RADAR TODAY
-# 3 STOCK + DATE
-# 4 STOCK + DATE RANGE
-# 5 DATE + RADAR
-# 6 DATE ONLY
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}(\s+RADAR)?", text):
+        await update.message.reply_text(
+            f"Scanning full F&O for {text}"
+        )
 
-if re.fullmatch(r"[A-Z]+\s\d{4}-\d{2}-\d{2}", text):
-    parts = text.split()
-    stock = parts[0] + ".NS"
-    scan_date = parts[1]
+        results = full_scan()
 
-    await update.message.reply_text(
-        f"Scanning {stock} for {scan_date}"
-    )
-
-    result = scan_stock(stock)
-
-    if result:
-        await update.message.reply_text(format_result(result))
-    else:
-        await update.message.reply_text("No setup found.")
-    return
-
-
-if re.fullmatch(r"[A-Z]+\s\d{4}-\d{2}-\d{2}\sTO\s\d{4}-\d{2}-\d{2}", text):
-    match = re.match(
-        r"([A-Z]+)\s(\d{4}-\d{2}-\d{2})\sTO\s(\d{4}-\d{2}-\d{2})",
-        text
-    )
-
-    stock = match.group(1) + ".NS"
-    from_date = match.group(2)
-    to_date = match.group(3)
-
-    await update.message.reply_text(
-        f"Scanning {stock} from {from_date} to {to_date}"
-    )
-
-    result = scan_stock(stock)
-
-    if result:
-        await update.message.reply_text(format_result(result))
-    else:
-        await update.message.reply_text("No setup found in range.")
-    return
-
-
-if re.fullmatch(r"\d{4}-\d{2}-\d{2}\sRADAR", text):
-    scan_date = text.replace(" RADAR", "")
-
-    await update.message.reply_text(
-        f"Scanning Radar only for {scan_date}"
-    )
-
-    results = full_scan()
-    radar_lines = []
-
-    for result in results:
-        if result.get("radar"):
-            radar_lines.append(
-                f"{result['symbol']} → {result['radar']['time']}"
-            )
-
-    if radar_lines:
-        await update.message.reply_text("\n".join(radar_lines))
-    else:
-        await update.message.reply_text("No radar setups found.")
-    return
-
-
-if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
-    await update.message.reply_text(
-        f"Scanning full F&O for {text}"
-    )
-
-    results = full_scan()
-
-    if results:
-        for result in results:
-            await update.message.reply_text(format_result(result))
-    else:
-        await update.message.reply_text("No setups found.")
-    return
+        if results:
+            for result in results:
+                await update.message.reply_text(format_result(result))
+        else:
+            await update.message.reply_text("No setups found.")
+        return
 
     await update.message.reply_text("Invalid command. Use /start")
 
@@ -643,16 +571,11 @@ if __name__ == "__main__":
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    loop.run_until_complete(
-        telegram_app.initialize()
-    )
-
-    loop.run_until_complete(
-        telegram_app.start()
-    )
+    loop.run_until_complete(telegram_app.initialize())
+    loop.run_until_complete(telegram_app.start())
 
     app.run(
         host="0.0.0.0",
         port=PORT
-    )
-    
+        )
+        
