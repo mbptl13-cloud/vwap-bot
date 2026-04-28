@@ -236,9 +236,11 @@ telegram_app.add_handler(MessageHandler(filters.TEXT, handle))
 
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def webhook():
-    print("WEBHOOK HIT")
+    print("🔥 WEBHOOK HIT")   # <--- MUST SEE THIS
 
     data = request.get_json(force=True)
+    print("DATA RECEIVED:", data)  # <--- ADD THIS TOO
+
     update = Update.de_json(data, bot)
 
     loop = asyncio.new_event_loop()
