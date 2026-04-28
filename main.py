@@ -559,8 +559,13 @@ def webhook():
     update_data = request.get_json(force=True)
     update = Update.de_json(update_data, bot)
 
-    if update is not None:
-        asyncio.run(telegram_app.process_update(update))
+    # SAFE async handling for Render
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    loop.run_until_complete(
+        telegram_app.process_update(update)
+    )
 
     return "ok"
 
@@ -568,14 +573,8 @@ def webhook():
 if __name__ == "__main__":
     print("🤖 HYBRID BOT RUNNING...")
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-
-    loop.run_until_complete(telegram_app.initialize())
-    loop.run_until_complete(telegram_app.start())
-
     app.run(
         host="0.0.0.0",
         port=PORT
-        )
+    )
         
