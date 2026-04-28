@@ -611,15 +611,6 @@ if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
         await update.message.reply_text("No setups found.")
     return
 
-        results = full_scan()
-
-        if results:
-            for result in results:
-                await update.message.reply_text(format_result(result))
-        else:
-            await update.message.reply_text("No setups found.")
-        return
-
     await update.message.reply_text("Invalid command. Use /start")
 
 
