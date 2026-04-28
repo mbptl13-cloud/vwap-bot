@@ -1,7 +1,5 @@
 import os
 import re
-import time
-import hashlib
 import requests
 import pandas as pd
 import yfinance as yf
@@ -17,20 +15,6 @@ BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 PORT = int(os.environ.get("PORT", 10000))
 
 app = Flask(__name__)
-
-# =========================
-# ANTI LOOP CONTROL (IMPORTANT)
-# =========================
-
-LAST_UPDATE_ID = set()
-SCAN_LOCK = False
-
-# =========================
-# STATE MEMORY
-# =========================
-
-RADAR_STATE = {}
-TRADED_TODAY = set()
 
 # =========================
 # STOCK LIST
@@ -53,27 +37,26 @@ def send(chat_id, text):
             f"{BASE_URL}/sendMessage",
             json={"chat_id": chat_id, "text": text}
         )
-    except Exception as e:
-        print("Send error:", e)
+    except:
+        pass
 
 # =========================
-# WEBHOOK SET
+# WEBHOOK
 # =========================
 
 def set_webhook():
     url = f"{RENDER_URL}/webhook"
     try:
-        r = requests.get(f"{BASE_URL}/setWebhook?url={url}")
-        print("Webhook:", r.text)
-    except Exception as e:
-        print("Webhook error:", e)
+        requests.get(f"{BASE_URL}/setWebhook?url={url}")
+    except:
+        pass
 
 # =========================
-# TIMEZONE FIX (IST)
+# TIMEZONE FIX
 # =========================
 
 def to_ist(df):
-    if df is None:
+    if df is None or df.empty:
         return None
 
     df = df.copy()
@@ -82,7 +65,6 @@ def to_ist(df):
     try:
         if df.index.tz is None:
             df.index = df.index.tz_localize("UTC")
-
         df.index = df.index.tz_convert("Asia/Kolkata")
     except:
         pass
@@ -90,11 +72,29 @@ def to_ist(df):
     return df
 
 # =========================
-# DATA ENGINE
+# SESSION FILTER (🔥 IMPORTANT)
+# =========================
+
+def session_filter(df):
+    if df is None or df.empty:
+        return None
+
+    df = df.copy()
+
+    try:
+        df = df.between_time("09:45", "13:30")
+    except:
+        return None
+
+    return df if not df.empty else None
+
+# =========================
+# DATA
 # =========================
 
 def get_data(symbol, interval):
     df = yf.download(symbol, interval=interval, period="5d", progress=False)
+
     if df is None or df.empty:
         return None
 
@@ -106,10 +106,30 @@ def vwap(df):
     return (tp * df["Volume"]).cumsum() / df["Volume"].cumsum()
 
 # =========================
+# DATE FILTER
+# =========================
+
+def filter_date(df, date):
+    if df is None or df.empty:
+        return None
+
+    df = df.copy()
+    df["date"] = df.index.date
+
+    target = pd.to_datetime(date).date()
+    df = df[df["date"] == target]
+
+    return df.drop(columns=["date"])
+
+# =========================
 # 15M RADAR
 # =========================
 
 def check_15m(df):
+    df = session_filter(df)
+    if df is None or len(df) < 20:
+        return None
+
     df = df.copy()
     df["VWAP"] = vwap(df)
     df["VOL_SMA20"] = df["Volume"].rolling(20).mean()
@@ -121,7 +141,7 @@ def check_15m(df):
         if op <= 0:
             continue
 
-        cond = (
+        if not (
             c["Volume"] > 500000 and
             c["Volume"] * c["Close"] > 150000000 and
             ((c["High"] - c["Low"]) / op) * 100 > 0.6 and
@@ -129,13 +149,13 @@ def check_15m(df):
             c["Close"] > c["VWAP"] and
             c["Volume"] > 2 * c["VOL_SMA20"] and
             c["Close"] > c["Open"]
-        )
+        ):
+            continue
 
-        if cond:
-            return {
-                "time": df.index[i],
-                "close": float(c["Close"])
-            }
+        return {
+            "time": df.index[i],
+            "close": float(c["Close"])
+        }
 
     return None
 
@@ -144,6 +164,11 @@ def check_15m(df):
 # =========================
 
 def check_5m(df, radar_time):
+    df = session_filter(df)
+
+    if df is None or df.empty:
+        return None
+
     df = df[df.index > radar_time]
     if df.empty:
         return None
@@ -178,16 +203,25 @@ def check_5m(df, radar_time):
 # SCAN STOCK
 # =========================
 
-def scan_stock(symbol):
+def scan_stock(symbol, date=None):
+
     df15 = to_ist(get_data(symbol, "15m"))
+    df5 = to_ist(get_data(symbol, "5m"))
+
     if df15 is None:
+        return None
+
+    if date:
+        df15 = filter_date(df15, date)
+        df5 = filter_date(df5, date)
+
+    if df15 is None or len(df15) == 0:
         return None
 
     radar = check_15m(df15)
     if not radar:
         return None
 
-    df5 = to_ist(get_data(symbol, "5m"))
     trade = check_5m(df5, radar["time"]) if df5 is not None else None
 
     return {
@@ -197,24 +231,17 @@ def scan_stock(symbol):
     }
 
 # =========================
-# SCAN ALL (ANTI LOCK)
+# SCAN ALL
 # =========================
 
-def scan_all():
-    global SCAN_LOCK
-
-    if SCAN_LOCK:
-        return []
-
-    SCAN_LOCK = True
-
+def scan_all(date=None):
     results = []
+
     for s in FNO_STOCKS:
-        r = scan_stock(s)
+        r = scan_stock(s, date)
         if r:
             results.append(r)
 
-    SCAN_LOCK = False
     return results
 
 # =========================
@@ -229,25 +256,9 @@ def format_result(r):
         t = r["trade"]
         msg += f"5M: {t['time']}\nEntry: {t['entry']} SL: {t['sl']} TG: {t['target']}\n"
     else:
-        msg += "RADAR ACTIVE\n"
+        msg += "RADAR ONLY\n"
 
     return msg
-
-# =========================
-# ANTI DUPLICATE UPDATE
-# =========================
-
-def is_duplicate(update_id):
-    if update_id in LAST_UPDATE_ID:
-        return True
-
-    LAST_UPDATE_ID.add(update_id)
-
-    # prevent memory overflow
-    if len(LAST_UPDATE_ID) > 5000:
-        LAST_UPDATE_ID.clear()
-
-    return False
 
 # =========================
 # WEBHOOK
@@ -257,10 +268,6 @@ def is_duplicate(update_id):
 def webhook():
     data = request.get_json(force=True)
 
-    update_id = data.get("update_id")
-    if update_id and is_duplicate(update_id):
-        return "ok"
-
     if "message" not in data:
         return "ok"
 
@@ -268,13 +275,11 @@ def webhook():
     chat_id = msg["chat"]["id"]
     text = msg.get("text", "").strip().upper()
 
-    print("CMD:", text)
-
     # =========================
     # LIVE
     # =========================
     if text == "LIVE":
-        send(chat_id, "📡 LIVE SCANNING STARTED")
+        send(chat_id, "📡 LIVE SCANNING (09:45–13:30 ONLY)")
         results = scan_all()
 
         for r in results:
@@ -290,17 +295,16 @@ def webhook():
         results = scan_all()
 
         for r in results:
-            if r.get("radar"):
-                send(chat_id, f"{r['symbol']} → {r['radar']['time']}")
+            send(chat_id, f"{r['symbol']} → {r['radar']['time']}")
 
         return "ok"
 
     # =========================
-    # DATE
+    # DATE SCAN
     # =========================
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
-        send(chat_id, f"📅 SCANNING {text}")
-        results = scan_all()
+        send(chat_id, f"📅 SCANNING {text} (SESSION ONLY)")
+        results = scan_all(date=text)
 
         for r in results:
             send(chat_id, format_result(r))
@@ -308,13 +312,14 @@ def webhook():
         return "ok"
 
     # =========================
-    # STOCK DATE
+    # STOCK + DATE
     # =========================
     if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2}", text):
         sym, date = text.split()
         send(chat_id, f"📊 SCANNING {sym}")
 
-        r = scan_stock(sym + ".NS")
+        r = scan_stock(sym + ".NS", date)
+
         if r:
             send(chat_id, format_result(r))
         else:
@@ -322,21 +327,6 @@ def webhook():
 
         return "ok"
 
-    # =========================
-    # RANGE
-    # =========================
-    if "TO" in text and re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2} TO \d{4}-\d{2}-\d{2}", text):
-        send(chat_id, "📅 RANGE SCAN")
-        r = scan_all()
-
-        for x in r:
-            send(chat_id, format_result(x))
-
-        return "ok"
-
-    # =========================
-    # DEFAULT
-    # =========================
     send(chat_id, "Unknown command")
     return "ok"
 
@@ -346,14 +336,14 @@ def webhook():
 
 @app.route("/")
 def home():
-    return "BOT V5 RUNNING"
+    return "BOT V6 SESSION ENGINE RUNNING"
 
 # =========================
 # START
 # =========================
 
 if __name__ == "__main__":
-    print("🚀 ANTI-LOOP V5 STARTED")
+    print("🚀 FINAL V6 ENGINE STARTED")
 
     set_webhook()
 
