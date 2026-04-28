@@ -1,21 +1,26 @@
 import os
+import re
 import asyncio
-import threading
 import pandas as pd
 import yfinance as yf
 from flask import Flask, request
-from telegram import Update
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram import Update, Bot
+from telegram.ext import (
+    Application,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    filters,
+)
 
-# =========================
-# CONFIG
-# =========================
+BOT_TOKEN = "8689896067:AAEuHnXG8f7orhfygCKvHoDItQmJTqzGGB4"
+WEBHOOK_URL = "https://vwap-bot-ia6r.onrender.com"
+PORT = int(os.environ.get("PORT", 10000))
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8689896067:AAEuHnXG8f7orhfygCKvHoDItQmJTqzGGB4")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://vwap-bot-ia6r.onrender.com")
-PORT = int(os.getenv("PORT", 10000))
+app = Flask(__name__)
+bot = Bot(token=BOT_TOKEN)
 
-STOCKS = [    
+FNO_STOCKS = [
     "360ONE.NS",
     "ABB.NS",
     "APLAPOLLO.NS",
@@ -232,670 +237,337 @@ STOCKS = [
 ]
 
 
-# =========================
-# INIT
-# =========================
+def normalize_dataframe(df):
+    if df is None or df.empty:
+        return None
 
-flask_app = Flask(__name__)
-app = Application.builder().token(BOT_TOKEN).build()
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = [col[0] for col in df.columns]
 
-# =========================
-# DATA
-# =========================
+    required_columns = ["Open", "High", "Low", "Close", "Volume"]
+    missing = [col for col in required_columns if col not in df.columns]
 
-def get_data(stock, interval, start=None, end=None):
+    if missing:
+        return None
+
+    df = df.copy()
+    df = df[required_columns]
+    df.dropna(inplace=True)
+
+    if df.empty:
+        return None
+
+    return df
+
+
+def download_data(symbol, interval="5m", period="5d"):
     try:
-        print(f"DOWNLOADING: {stock} | {interval}")
-
         df = yf.download(
-            tickers=stock,
+            tickers=symbol,
             interval=interval,
-            start=start,
-            end=end,
+            period=period,
             progress=False,
             auto_adjust=False,
             threads=False,
-            prepost=False
         )
 
-        if df is None or df.empty:
-            print(f"NO DATA: {stock} | {interval}")
-            return pd.DataFrame()
-
-        df.dropna(inplace=True)
-
-        print(f"DATA OK: {stock} | {interval} | Rows: {len(df)}")
-
-        return df
+        return normalize_dataframe(df)
 
     except Exception as e:
-        print(f"DOWNLOAD ERROR: {stock} | {interval} | {e}")
-        return pd.DataFrame()
+        print(f"Download Error {symbol}: {e}")
+        return None
 
 
+def filter_market_time(df):
+    if df is None or df.empty:
+        return None
 
-# =========================================
-# FINAL WORKING LOGIC
-# 15M FIRST → THEN 5M ENTRY
-# USING YOUR WORKING STRUCTURE
-# =========================================
+    df = df.copy()
 
-def find_trade(df15, df5, stock):
+    if getattr(df.index, "tz", None) is not None:
+        df.index = df.index.tz_localize(None)
+
     try:
-        if df15.empty or df5.empty:
+        df = df.between_time("09:45", "13:30")
+    except Exception:
+        return None
+
+    if df.empty:
+        return None
+
+    return df
+
+
+def calculate_vwap(df):
+    tp = (df["High"] + df["Low"] + df["Close"]) / 3
+    volume_cumsum = df["Volume"].cumsum()
+
+    if (volume_cumsum == 0).any():
+        return None
+
+    return (tp * df["Volume"]).cumsum() / volume_cumsum
+
+
+def candle_body(row):
+    return abs(float(row["Close"]) - float(row["Open"]))
+
+
+def candle_range(row):
+    return float(row["High"]) - float(row["Low"])
+
+
+def check_15m_condition(df):
+    if df is None or len(df) < 20:
+        return None
+
+    df = df.copy()
+    vwap = calculate_vwap(df)
+
+    if vwap is None:
+        return None
+
+    df["VWAP"] = vwap
+    df["VOL_SMA20"] = df["Volume"].rolling(20).mean()
+
+    for i in range(19, len(df)):
+        row = df.iloc[i]
+
+        if pd.isna(row["VOL_SMA20"]):
+            continue
+
+        open_price = float(row["Open"])
+        if open_price <= 0:
+            continue
+
+        volume_ok = float(row["Volume"]) > 500000
+        value_ok = (float(row["Volume"]) * float(row["Close"])) > 150000000
+
+        range_pct = (candle_range(row) / open_price) * 100
+        body_pct = (candle_body(row) / open_price) * 100
+
+        range_ok = range_pct > 0.6
+        body_ok = body_pct > 0.6
+        vwap_ok = float(row["Close"]) > float(row["VWAP"])
+        vol_surge_ok = float(row["Volume"]) > (2 * float(row["VOL_SMA20"]))
+        bullish_ok = float(row["Close"]) > float(row["Open"])
+
+        if all([
+            volume_ok,
+            value_ok,
+            range_ok,
+            body_ok,
+            vwap_ok,
+            vol_surge_ok,
+            bullish_ok,
+        ]):
             return {
-                "stock": stock,
-                "radar": False,
-                "entry": False,
-                "t15": None,
-                "t5": None,
-                "entry_price": None,
-                "sl": None,
-                "target": None,
-                "result": "NO DATA"
+                "time": df.index[i],
+                "close": round(float(row["Close"]), 2),
             }
 
-        # =========================
-        # ADD VWAP
-        # =========================
+    return None
 
-        df15 = add_vwap(df15)
-        df5 = add_vwap(df5)
 
-        # =========================
-        # DAY HIGH
-        # =========================
+def check_5m_trade(df, radar_time):
+    if df is None or df.empty:
+        return None
 
-        day_high = df15["High"].max()
+    df = df.copy()
+    df = df[df.index > radar_time]
 
-        # =========================
-        # LOOP THROUGH 5M CANDLES
-        # =========================
+    if df.empty:
+        return None
 
-        for i in range(1, len(df5)):
+    vwap = calculate_vwap(df)
+    if vwap is None:
+        return None
 
-            current_time = df5.index[i]
+    df["VWAP"] = vwap
 
-            # =====================================
-            # ENTRY WINDOW → 09:45 to 13:30
-            # =====================================
+    for i in range(len(df)):
+        row = df.iloc[i]
 
-            if (
-                current_time.time() < pd.to_datetime("09:45").time()
-                or
-                current_time.time() > pd.to_datetime("13:30").time()
-            ):
-                continue
+        low_price = float(row["Low"])
+        high_price = float(row["High"])
+        open_price = float(row["Open"])
+        close_price = float(row["Close"])
+        vwap_value = float(row["VWAP"])
 
-            # =====================================
-            # ALL 15M CANDLES BEFORE CURRENT 5M TIME
-            # =====================================
+        vwap_touch = low_price <= vwap_value <= high_price
+        bullish_close = close_price > open_price
 
-            df15_valid = df15[
-                df15.index <= current_time
-            ]
+        if not (vwap_touch and bullish_close):
+            continue
 
-            valid_15m_times = []
+        entry = round(high_price, 2)
+        sl = round(low_price, 2)
+        risk = round(entry - sl, 2)
 
-            # =====================================
-            # 15M CHECK FIRST
-            # =====================================
+        if risk <= 0:
+            continue
 
-            for idx, row15 in df15_valid.iterrows():
+        if risk < round(entry * 0.003, 2):
+            continue
 
-                # Ignore 09:30 and before
-                if idx.time() <= pd.to_datetime("09:30").time():
-                    continue
-
-                try:
-                    o = float(row15["Open"])
-                    h = float(row15["High"])
-                    l = float(row15["Low"])
-                    c = float(row15["Close"])
-                    v = float(row15["Volume"])
-                    vwap = float(row15["vwap"])
-
-                except:
-                    continue
-
-                candle_range = h - l
-
-                if candle_range <= 0:
-                    continue
-
-                body = abs(c - o)
-
-                # =====================================
-                # FULL 15M CONDITIONS
-                # =====================================
-
-                cond1 = v > 500000
-
-                cond2 = (c * v) > 150000000
-
-                range_pct = (candle_range / o) * 100
-                cond3 = range_pct > 1
-
-                body_pct = (body / o) * 100
-                cond4 = body_pct > 0.6
-
-                cond5 = c > vwap
-
-                cond6 = (
-                    v > df15["Volume"].mean() * 1.5
-                )
-
-                cond7 = c > o
-
-                if (
-                    cond1 and cond2 and cond3
-                    and cond4 and cond5
-                    and cond6 and cond7
-                ):
-                    valid_15m_times.append(idx)
-
-            # =====================================
-            # NO 15M → NO TRADE
-            # =====================================
-
-            if not valid_15m_times:
-                continue
-
-            # LAST VALID 15M SIGNAL
-            trigger_time = valid_15m_times[-1]
-
-            last15 = df15.loc[trigger_time]
-
-            # =====================================
-            # NO SAME CANDLE ENTRY
-            # =====================================
-
-            if current_time <= trigger_time:
-                continue
-
-            # =====================================
-            # ENTRY MUST BE WITHIN 60 MIN
-            # =====================================
-
-            if (
-                current_time - trigger_time
-            ) > pd.Timedelta(minutes=60):
-                continue
-
-            # =====================================
-            # NOW CHECK 5M ENTRY
-            # =====================================
-
-            row = df5.iloc[i]
-            prev = df5.iloc[i - 1]
-
-            try:
-                # VWAP Pullback
-                condA = (
-                    row["Low"] <= row["vwap"] * 1.002
-                    and
-                    row["Close"] > row["vwap"]
-                )
-
-                # Breakout Candle
-                condB = (
-                    row["Close"] > prev["High"]
-                    and
-                    row["Close"] > row["Open"]
-                )
-
-                if not condA:
-                    continue
-
-                if not condB:
-                    continue
-
-                # =====================================
-                # ENTRY / SL / TARGET
-                # =====================================
-
-                entry = float(row["Close"])
-                sl = float(row["vwap"])
-
-                # Minimum SL Filter
-                min_risk = entry * 0.003
-                actual_risk = entry - sl
-
-                if actual_risk < min_risk:
-                    continue
-
-                target = entry + (actual_risk * 2)
-
-                # =====================================
-                # RESULT CHECK
-                # =====================================
-
-                result = "OPEN"
-
-                for j in range(i + 1, len(df5)):
-                    future = df5.iloc[j]
-
-                    if future["Low"] <= sl:
-                        result = "LOSS"
-                        break
-
-                    elif future["High"] >= target:
-                        result = "WIN"
-                        break
-
-                # =====================================
-                # FINAL RETURN
-                # =====================================
-
-                return {
-                    "stock": stock,
-                    "radar": True,
-                    "entry": True,
-                    "t15": str(trigger_time),
-                    "t5": str(current_time),
-                    "entry_price": round(entry, 2),
-                    "sl": round(sl, 2),
-                    "target": round(target, 2),
-                    "result": result
-                }
-
-            except Exception as e:
-                print("5M ERROR:", e)
-                continue
-
-        # =====================================
-        # ONLY RADAR FOUND / NO ENTRY
-        # =====================================
-
-        if len(valid_15m_times) > 0:
-            return {
-                "stock": stock,
-                "radar": True,
-                "entry": False,
-                "t15": str(valid_15m_times[-1]),
-                "t5": None,
-                "entry_price": None,
-                "sl": None,
-                "target": None,
-                "result": "WAITING FOR 5M"
-            }
-
-        # =====================================
-        # NO SIGNAL
-        # =====================================
+        target = round(entry + (risk * 2), 2)
 
         return {
-            "stock": stock,
-            "radar": False,
-            "entry": False,
-            "t15": None,
-            "t5": None,
-            "entry_price": None,
-            "sl": None,
-            "target": None,
-            "result": "NO TRADE"
+            "time": df.index[i],
+            "entry": entry,
+            "sl": sl,
+            "target": target,
         }
 
-    except Exception as e:
-        print("FIND TRADE ERROR:", e)
+    return None
+
+
+def scan_stock(symbol):
+    try:
+        df15 = filter_market_time(download_data(symbol, "15m", "5d"))
+        radar = check_15m_condition(df15)
+
+        if not radar:
+            return None
+
+        df5 = filter_market_time(download_data(symbol, "5m", "5d"))
+        trade = check_5m_trade(df5, radar["time"])
 
         return {
-            "stock": stock,
-            "radar": False,
-            "entry": False,
-            "t15": None,
-            "t5": None,
-            "entry_price": None,
-            "sl": None,
-            "target": None,
-            "result": "ERROR"
-        }
-
-
-# =========================
-# CORE SCAN
-# =========================
-
-def scan_stock(stock, date=None):
-    try:
-        if date:
-            start = pd.to_datetime(date).strftime("%Y-%m-%d")
-            end = (
-                pd.to_datetime(date) + pd.Timedelta(days=1)
-            ).strftime("%Y-%m-%d")
-        else:
-            start = None
-            end = None
-
-        df15 = get_data(stock, "15m", start, end)
-        df5 = get_data(stock, "5m", start, end)
-
-        if df15.empty or df5.empty:
-            return {
-                "stock": stock,
-                "radar": False,
-                "entry": False,
-                "t15": None,
-                "t5": None,
-                "price": None
-            }
-
-        radar, t15 = radar_15m(df15)
-
-        result = {
-            "stock": stock,
+            "symbol": symbol,
             "radar": radar,
-            "entry": False,
-            "t15": str(t15) if radar else None,
-            "t5": None,
-            "price": None
+            "trade": trade,
         }
-
-        if radar:
-            entry, t5, price = entry_5m(df5)
-
-            if entry:
-                result["entry"] = True
-                result["t5"] = str(t5)
-                result["price"] = round(price, 2)
-
-        return result
 
     except Exception as e:
-        print("SCAN ERROR:", stock, e)
+        print(f"Scan Error {symbol}: {e}")
+        return None
 
-        return {
-            "stock": stock,
-            "radar": False,
-            "entry": False,
-            "t15": None,
-            "t5": None,
-            "price": None
-        }
 
-def live_scan():
-    return [scan_stock(s) for s in STOCKS]
+def full_scan():
+    results = []
 
-# =========================
-# TELEGRAM HANDLERS (YOUR INPUTS KEPT)
-# =========================
+    for stock in FNO_STOCKS:
+        result = scan_stock(stock)
+        if result is not None:
+            results.append(result)
+
+    return results
+
+
+def format_result(result):
+    message = f"📊 {result['symbol']}\n"
+    message += f"15M Time: {result['radar']['time']}\n"
+
+    trade = result.get("trade")
+
+    if trade:
+        message += f"5M Time: {trade['time']}\n"
+        message += f"Entry: {trade['entry']}\n"
+        message += f"SL: {trade['sl']}\n"
+        message += f"Target: {trade['target']}\n"
+    else:
+        message += "RADAR ACTIVE → Waiting for 5M Setup\n"
+
+    return message
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    print("START OK")
-    await update.message.reply_text("🚀 Radar Bot Connected")
+    text = """
+🤖 NSE F&O HYBRID BOT READY
 
-async def live(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    print("LIVE TRIGGERED")
+Commands:
 
-    results = live_scan()
+LIVE
+RADAR TODAY
+2026-04-06
+BHEL 2026-04-06
+BHEL 2026-04-06 to 2026-04-10
+2026-04-06 RADAR
+"""
+    await update.message.reply_text(text)
 
-    msg = "📡 LIVE RADAR\n\n"
 
-    for r in results:
-        msg += f"{r['stock']} | RADAR:{r['radar']} | ENTRY:{r['entry']}\n"
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
+        return
 
-    await update.message.reply_text(msg)
-
-def parse_input(text):
-
-    text = text.strip().upper()
-
-    # LIVE MODE
-    if text in ["LIVE", "RADAR TODAY"]:
-        return {"type": "live"}
-
-    # DATE ONLY BACKTEST
-    # Example: 2026-04-06
-    if len(text.split()) == 1 and "-" in text:
-        return {
-            "type": "date_only",
-            "date": text
-        }
-
-    # RADAR MODE
-    # Example: 2026-04-06 RADAR
-    if "RADAR" in text and len(text.split()) == 2:
-        return {
-            "type": "radar_date",
-            "date": text.split()[0]
-        }
-
-    # RANGE BACKTEST
-    # Example: BHEL 2026-04-01 TO 2026-04-20
-    if "TO" in text:
-        parts = text.split()
-        return {
-            "type": "range",
-            "stock": parts[0],
-            "start": parts[1],
-            "end": parts[3]
-        }
-
-    # SINGLE STOCK BACKTEST
-    # Example: BHEL 2026-04-06
-    parts = text.split()
-    if len(parts) == 2:
-        return {
-            "type": "single",
-            "stock": parts[0],
-            "date": parts[1]
-        }
-
-    return {"type": "invalid"}
-
-async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip().upper()
-    print("INPUT:", text)
 
-    req = parse_input(text)
-
-    # =========================
-    # LIVE MODE
-    # =========================
-    if req["type"] == "live":
-        await update.message.reply_text("📡 LIVE SCAN STARTED...")
-        await live(update, context)
-        return
-
-    # =========================
-    # DATE ONLY BACKTEST
-    # Example: 2026-04-06
-    # =========================
-    if req["type"] == "date_only":
-        date = req["date"]
-
-        await update.message.reply_text(
-            f"📊 FULL MARKET BACKTEST STARTED...\nDate: {date}"
-        )
-
-        try:
-            results = []
-
-            for stock in STOCKS:
-                result = scan_stock(stock, date)
-                if result["radar"]:
-                    results.append(result)
-
-            if not results:
-                await update.message.reply_text(
-                    f"❌ No radar signals found for {date}"
-                )
-                return
-
-            msg = f"📊 BACKTEST RESULT ({date})\n\n"
-
-            for r in results[:15]:
-                msg += (
-                    f"{r['stock']} | "
-                    f"RADAR:{r['radar']} | "
-                    f"ENTRY:{r['entry']}\n"
-                )
-
-            await update.message.reply_text(msg)
-
-        except Exception as e:
-            await update.message.reply_text(
-                f"❌ BACKTEST ERROR: {str(e)}"
-            )
-        return
-
-    # =========================
-    # RADAR DATE MODE
-    # Example: 2026-04-06 RADAR
-    # =========================
-    if req["type"] == "radar_date":
-        await update.message.reply_text(
-            f"📡 RADAR MODE ACTIVE\nDate: {req['date']}"
-        )
-        return
-
-    # =========================
-    # RANGE BACKTEST
-    # Example:
-    # BHEL 2026-04-01 to 2026-04-20
-    # =========================
-    if req["type"] == "range":
-        stock = req["stock"]
-        start = req["start"]
-        end = req["end"]
-
-        await update.message.reply_text(
-            f"📊 RANGE BACKTEST STARTED...\n{stock}\n{start} → {end}"
-        )
-
-        try:
-            result = scan_stock(stock + ".NS", start)
-
-            await update.message.reply_text(
-                f"""📊 RANGE RESULT
-
-Stock: {stock}
-From: {start}
-To: {end}
-
-RADAR: {result['radar']}
-ENTRY: {result['entry']}
-15M TIME: {result['t15']}
-5M TIME: {result['t5']}
-PRICE: {result['price']}"""
-            )
-
-        except Exception as e:
-            await update.message.reply_text(
-                f"❌ RANGE ERROR: {str(e)}"
-            )
-        return
-
-    # =========================
-    # SINGLE STOCK BACKTEST
-    # Example:
-    # ADANIGREEN 2026-04-06
-    # =========================
-    if req["type"] == "single":
-        stock = req["stock"]
-        date = req["date"]
-
-        await update.message.reply_text(
-            f"📊 BACKTEST STARTED...\nStock: {stock}\nDate: {date}"
-        )
-
-        try:
-            result = scan_stock(stock + ".NS", date)
-
-            await update.message.reply_text(
-                f"""📊 BACKTEST RESULT
-
-Stock: {stock}
-Date: {date}
-
-RADAR: {result['radar']}
-ENTRY: {result['entry']}
-15M TIME: {result['t15']}
-5M TIME: {result['t5']}
-PRICE: {result['price']}"""
-            )
-
-        except Exception as e:
-            await update.message.reply_text(
-                f"❌ SINGLE BACKTEST ERROR: {str(e)}"
-            )
-        return
-
-    # =========================
-    # INVALID INPUT
-    # =========================
     await update.message.reply_text(
-        "❌ INVALID INPUT FORMAT"
+        f"⏳ Processing: {text}\nPlease wait..."
     )
 
-# =========================
-# REGISTER
-# =========================
+    if text == "LIVE":
+        results = full_scan()
 
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("live", live))
-app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+        if not results:
+            await update.message.reply_text("No setups found.")
+            return
 
-# =========================
-# FIXED WEBHOOK (CRITICAL FIX)
-# =========================
+        for result in results:
+            await update.message.reply_text(format_result(result))
+        return
 
-@flask_app.post("/")
-def webhook():
-    try:
-        data = request.get_json(force=True)
+    if text == "RADAR TODAY":
+        results = full_scan()
+        radar_lines = []
 
-        update = Update.de_json(data, app.bot)
+        for result in results:
+            if result.get("radar"):
+                radar_lines.append(
+                    f"{result['symbol']} → {result['radar']['time']}"
+                )
 
-        # FIX: stable event loop handling
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        loop.run_until_complete(app.process_update(update))
+        if radar_lines:
+            await update.message.reply_text("\n".join(radar_lines))
+        else:
+            await update.message.reply_text("No radar found today.")
+        return
 
-        return "OK"
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}(\s+RADAR)?", text):
+        await update.message.reply_text(
+            f"Scanning full F&O for {text}"
+        )
 
-    except Exception as e:
-        print("WEBHOOK ERROR:", e)
-        return "ERROR"
+        results = full_scan()
 
-# =========================
-# HEALTH CHECK
-# =========================
+        if results:
+            for result in results:
+                await update.message.reply_text(format_result(result))
+        else:
+            await update.message.reply_text("No setups found.")
+        return
 
-@flask_app.get("/")
+    await update.message.reply_text("Invalid command. Use /start")
+
+
+telegram_app = Application.builder().token(BOT_TOKEN).build()
+telegram_app.add_handler(CommandHandler("start", start))
+telegram_app.add_handler(
+    MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
+)
+
+
+@app.route("/")
 def home():
-    return "BOT RUNNING"
+    return "Bot Running Successfully"
 
-# =========================
-# WEBHOOK SETUP FIXED
-# =========================
 
-async def set_webhook():
-    await app.initialize()
-    await app.start()
+@app.route(f"/{BOT_TOKEN}", methods=["POST"])
+def webhook():
+    update_data = request.get_json(force=True)
+    update = Update.de_json(update_data, bot)
 
-    await app.bot.delete_webhook(drop_pending_updates=True)
-    await app.bot.set_webhook(url=f"{WEBHOOK_URL}/")
+    if update is not None:
+        asyncio.run(telegram_app.process_update(update))
 
-    info = await app.bot.get_webhook_info()
-    print("WEBHOOK:", info.url)
+    return "ok"
 
-# =========================
-# RUN SERVER
-# =========================
-
-def run_flask():
-    flask_app.run(host="0.0.0.0", port=PORT)
-
-async def main():
-    await set_webhook()
-
-    threading.Thread(target=run_flask).start()
-
-    print("🚀 BOT RUNNING FIXED CONNECTION MODE")
-
-    while True:
-        await asyncio.sleep(3600)
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    telegram_app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}",
+        secret_token=None,
+    )
