@@ -11,7 +11,7 @@ from flask import Flask, request
 # CONFIG
 # =========================
 
-BOT_TOKEN = "8689896067:AAEuHnXG8f7orhfygCKvHoDItQmJTqzGGB4
+BOT_TOKEN = "8689896067:AAEuHnXG8f7orhfygCKvHoDItQmJTqzGGB4"
 RENDER_URL = "https://vwap-bot-ia6r.onrender.com"
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 PORT = int(os.environ.get("PORT", 10000))
