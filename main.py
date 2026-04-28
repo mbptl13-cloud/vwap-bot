@@ -362,6 +362,27 @@ def radar_15m(df):
         # FINAL FILTER
         # =====================================
 
+        print(
+    "\n=============================="
+)
+print("TIME:", idx)
+print("OPEN:", o)
+print("HIGH:", h)
+print("LOW:", l)
+print("CLOSE:", c)
+print("VOLUME:", v)
+print("VWAP:", vwap_15m)
+print("VOL SMA:", vol_sma)
+
+print("COND1 Volume > 500000:", cond1)
+print("COND2 Value > 15Cr:", cond2)
+print("COND3 Range > 1%:", cond3)
+print("COND4 Body > 0.6%:", cond4)
+print("COND5 Close > VWAP:", cond5)
+print("COND6 Vol Spike:", cond6)
+print("COND7 Bullish Candle:", cond7)
+print("==============================\n")
+
         if (
             cond1 and cond2 and cond3
             and cond4 and cond5
