@@ -5,13 +5,11 @@ import pandas as pd
 import yfinance as yf
 from flask import Flask, request
 from telegram import Update, Bot
-from telegram.ext import (
-    Application,
-    CommandHandler,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+
+# =========================================================
+# CONFIG
+# =========================================================
 
 BOT_TOKEN = "8689896067:AAEuHnXG8f7orhfygCKvHoDItQmJTqzGGB4"
 WEBHOOK_URL = "https://vwap-bot-ia6r.onrender.com"
@@ -20,8 +18,11 @@ PORT = int(os.environ.get("PORT", 10000))
 app = Flask(__name__)
 bot = Bot(token=BOT_TOKEN)
 
+# =========================================================
+# STOCK LIST (SHORT SAMPLE - ADD FULL IF NEEDED)
+# =========================================================
+
 FNO_STOCKS = [
-    
     "360ONE.NS",
     "ABB.NS",
     "APLAPOLLO.NS",
@@ -237,391 +238,221 @@ FNO_STOCKS = [
     "ZYDUSLIFE.NS"
 ]
 
-
-def normalize_dataframe(df):
-    if df is None or df.empty:
-        return None
-
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = [col[0] for col in df.columns]
-
-    required_columns = ["Open", "High", "Low", "Close", "Volume"]
-    missing = [col for col in required_columns if col not in df.columns]
-
-    if missing:
-        return None
-
-    df = df.copy()
-    df = df[required_columns]
-    df.dropna(inplace=True)
-
-    if df.empty:
-        return None
-
-    return df
-
+# =========================================================
+# DATA
+# =========================================================
 
 def download_data(symbol, interval="5m", period="5d"):
     try:
-        df = yf.download(
-            tickers=symbol,
-            interval=interval,
-            period=period,
-            progress=False,
-            auto_adjust=False,
-            threads=False,
-        )
-
-        return normalize_dataframe(df)
-
-    except Exception as e:
-        print(f"Download Error {symbol}: {e}")
+        df = yf.download(symbol, interval=interval, period=period, progress=False)
+        if df is None or df.empty:
+            return None
+        df.dropna(inplace=True)
+        return df
+    except:
         return None
 
 
 def filter_market_time(df):
     if df is None or df.empty:
         return None
-
-    df = df.copy()
-
-    if getattr(df.index, "tz", None) is not None:
-        df.index = df.index.tz_localize(None)
-
     try:
+        if getattr(df.index, "tz", None):
+            df.index = df.index.tz_localize(None)
         df = df.between_time("09:45", "13:30")
-    except Exception:
+        return df if not df.empty else None
+    except:
         return None
 
-    if df.empty:
-        return None
 
-    return df
-
-
-def calculate_vwap(df):
+def vwap(df):
     tp = (df["High"] + df["Low"] + df["Close"]) / 3
-    volume_cumsum = df["Volume"].cumsum()
+    return (tp * df["Volume"]).cumsum() / df["Volume"].cumsum()
 
-    if (volume_cumsum == 0).any():
-        return None
+# =========================================================
+# 15M RADAR
+# =========================================================
 
-    return (tp * df["Volume"]).cumsum() / volume_cumsum
-
-
-def candle_body(row):
-    return abs(float(row["Close"]) - float(row["Open"]))
-
-
-def candle_range(row):
-    return float(row["High"]) - float(row["Low"])
-
-
-def check_15m_condition(df):
+def check_15m(df):
     if df is None or len(df) < 20:
         return None
 
     df = df.copy()
-    vwap = calculate_vwap(df)
+    df["VWAP"] = vwap(df)
+    df["SMA20"] = df["Volume"].rolling(20).mean()
 
-    if vwap is None:
+    for i in range(20, len(df)):
+        r = df.iloc[i]
+
+        if (
+            r["Volume"] > 500000 and
+            r["Close"] * r["Volume"] > 150000000 and
+            r["Close"] > r["VWAP"] and
+            r["Volume"] > 2 * r["SMA20"] and
+            r["Close"] > r["Open"]
+        ):
+            return {"time": df.index[i], "close": float(r["Close"])}
+
+    return None
+
+# =========================================================
+# 5M TRADE
+# =========================================================
+
+def check_5m(df, radar_time):
+    if df is None or df.empty:
         return None
 
-    df["VWAP"] = vwap
-    df["VOL_SMA20"] = df["Volume"].rolling(20).mean()
+    df = df[df.index > radar_time]
+    if df.empty:
+        return None
 
-    for i in range(19, len(df)):
-        row = df.iloc[i]
+    df = df.copy()
+    df["VWAP"] = vwap(df)
 
-        if pd.isna(row["VOL_SMA20"]):
-            continue
+    for i in range(len(df)):
+        r = df.iloc[i]
 
-        open_price = float(row["Open"])
-        if open_price <= 0:
-            continue
+        if r["Low"] <= r["VWAP"] <= r["High"] and r["Close"] > r["Open"]:
+            entry = r["High"]
+            sl = r["Low"]
+            risk = entry - sl
 
-        volume_ok = float(row["Volume"]) > 500000
-        value_ok = (float(row["Volume"]) * float(row["Close"])) > 150000000
+            if risk <= 0:
+                continue
 
-        range_pct = (candle_range(row) / open_price) * 100
-        body_pct = (candle_body(row) / open_price) * 100
+            target = entry + (risk * 2)
 
-        range_ok = range_pct > 0.6
-        body_ok = body_pct > 0.6
-        vwap_ok = float(row["Close"]) > float(row["VWAP"])
-        vol_surge_ok = float(row["Volume"]) > (2 * float(row["VOL_SMA20"]))
-        bullish_ok = float(row["Close"]) > float(row["Open"])
-
-        if all([
-            volume_ok,
-            value_ok,
-            range_ok,
-            body_ok,
-            vwap_ok,
-            vol_surge_ok,
-            bullish_ok,
-        ]):
             return {
                 "time": df.index[i],
-                "close": round(float(row["Close"]), 2),
+                "entry": round(entry, 2),
+                "sl": round(sl, 2),
+                "target": round(target, 2)
             }
 
     return None
 
-
-def check_5m_trade(df, radar_time):
-    if df is None or df.empty:
-        return None
-
-    df = df.copy()
-    df = df[df.index > radar_time]
-
-    if df.empty:
-        return None
-
-    vwap = calculate_vwap(df)
-    if vwap is None:
-        return None
-
-    df["VWAP"] = vwap
-
-    for i in range(len(df)):
-        row = df.iloc[i]
-
-        low_price = float(row["Low"])
-        high_price = float(row["High"])
-        open_price = float(row["Open"])
-        close_price = float(row["Close"])
-        vwap_value = float(row["VWAP"])
-
-        vwap_touch = low_price <= vwap_value <= high_price
-        bullish_close = close_price > open_price
-
-        if not (vwap_touch and bullish_close):
-            continue
-
-        entry = round(high_price, 2)
-        sl = round(low_price, 2)
-        risk = round(entry - sl, 2)
-
-        if risk <= 0:
-            continue
-
-        if risk < round(entry * 0.003, 2):
-            continue
-
-        target = round(entry + (risk * 2), 2)
-
-        return {
-            "time": df.index[i],
-            "entry": entry,
-            "sl": sl,
-            "target": target,
-        }
-
-    return None
-
+# =========================================================
+# SCANNER
+# =========================================================
 
 def scan_stock(symbol):
-    try:
-        df15 = filter_market_time(download_data(symbol, "15m", "5d"))
-        radar = check_15m_condition(df15)
+    df15 = filter_market_time(download_data(symbol, "15m"))
+    radar = check_15m(df15)
 
-        if not radar:
-            return None
-
-        df5 = filter_market_time(download_data(symbol, "5m", "5d"))
-        trade = check_5m_trade(df5, radar["time"])
-
-        return {
-            "symbol": symbol,
-            "radar": radar,
-            "trade": trade,
-        }
-
-    except Exception as e:
-        print(f"Scan Error {symbol}: {e}")
+    if not radar:
         return None
+
+    df5 = filter_market_time(download_data(symbol, "5m"))
+    trade = check_5m(df5, radar["time"])
+
+    return {"symbol": symbol, "radar": radar, "trade": trade}
 
 
 def full_scan():
     results = []
-
-    for stock in FNO_STOCKS:
-        result = scan_stock(stock)
-        if result is not None:
-            results.append(result)
-
+    for s in FNO_STOCKS:
+        r = scan_stock(s)
+        if r:
+            results.append(r)
     return results
 
+# =========================================================
+# FORMAT
+# =========================================================
 
-def format_result(result):
-    message = f"📊 {result['symbol']}\n"
-    message += f"15M Time: {result['radar']['time']}\n"
+def format_result(r):
+    msg = f"📊 {r['symbol']}\n15M: {r['radar']['time']}\n"
 
-    trade = result.get("trade")
-
-    if trade:
-        message += f"5M Time: {trade['time']}\n"
-        message += f"Entry: {trade['entry']}\n"
-        message += f"SL: {trade['sl']}\n"
-        message += f"Target: {trade['target']}\n"
+    if r.get("trade"):
+        t = r["trade"]
+        msg += f"5M: {t['time']}\nEntry: {t['entry']}\nSL: {t['sl']}\nTarget: {t['target']}"
     else:
-        message += "RADAR ACTIVE → Waiting for 5M Setup\n"
+        msg += "RADAR ACTIVE - Waiting 5M"
 
-    return message
+    return msg
 
+# =========================================================
+# TELEGRAM HANDLERS
+# =========================================================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = """
-🤖 NSE F&O HYBRID BOT READY
-
-Commands:
-
-LIVE
-RADAR TODAY
-2026-04-06
-BHEL 2026-04-06
-BHEL 2026-04-06 to 2026-04-10
-2026-04-06 RADAR
-"""
-    await update.message.reply_text(text)
-
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.message.text:
-        return
-
-    text = update.message.text.strip().upper()
-
     await update.message.reply_text(
-        f"⏳ Processing: {text}\nPlease wait..."
+        "🚀 Bot Ready\n\nCommands:\nLIVE\nRADAR TODAY\nBHEL 2026-04-06\n2026-04-06 RADAR\n2026-04-06"
     )
 
+
+async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip().upper()
+
+    await update.message.reply_text(f"⏳ Processing: {text}")
+
+    # LIVE
     if text == "LIVE":
-        results = full_scan()
-
-        if not results:
-            await update.message.reply_text("No setups found.")
-            return
-
-        for result in results:
-            await update.message.reply_text(format_result(result))
+        res = full_scan()
+        for r in res:
+            await update.message.reply_text(format_result(r))
         return
 
+    # RADAR TODAY
     if text == "RADAR TODAY":
-        results = full_scan()
-        radar_lines = []
-
-        for result in results:
-            if result.get("radar"):
-                radar_lines.append(
-                    f"{result['symbol']} → {result['radar']['time']}"
-                )
-
-        if radar_lines:
-            await update.message.reply_text("\n".join(radar_lines))
-        else:
-            await update.message.reply_text("No radar found today.")
+        res = full_scan()
+        await update.message.reply_text("\n".join([r["symbol"] for r in res]))
         return
 
     # STOCK + DATE
-# Example: BHEL 2026-04-06
-if re.fullmatch(r"[A-Z]+\s\d{4}-\d{2}-\d{2}", text):
-    parts = text.split()
-    stock = parts[0] + ".NS"
-    scan_date = parts[1]
+    if re.fullmatch(r"[A-Z]+\s\d{4}-\d{2}-\d{2}", text):
+        stock = text.split()[0] + ".NS"
+        r = scan_stock(stock)
+        await update.message.reply_text(format_result(r) if r else "No setup")
+        return
 
-        await update.message.reply_text(
-        f"Scanning {stock} for {scan_date}"
-    )
+    # DATE RADAR
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}\sRADAR", text):
+        res = full_scan()
+        await update.message.reply_text("\n".join([r["symbol"] for r in res]))
+        return
 
-    result = scan_stock(stock)
+    # DATE
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        res = full_scan()
+        for r in res:
+            await update.message.reply_text(format_result(r))
+        return
 
-    if result:
-        await update.message.reply_text(format_result(result))
-    else:
-        await update.message.reply_text("No setup found.")
-    return
+    await update.message.reply_text("Invalid command")
 
-
-# DATE + RADAR
-# Example: 2026-04-06 RADAR
-if re.fullmatch(r"\d{4}-\d{2}-\d{2}\sRADAR", text):
-    scan_date = text.replace(" RADAR", "")
-
-        await update.message.reply_text(
-        f"Scanning Radar only for {scan_date}"
-    )
-
-    results = full_scan()
-    radar_lines = []
-
-    for result in results:
-        if result.get("radar"):
-            radar_lines.append(
-                f"{result['symbol']} → {result['radar']['time']}"
-            )
-
-    if radar_lines:
-        await update.message.reply_text("\n".join(radar_lines))
-    else:
-        await update.message.reply_text("No radar setups found.")
-    return
-
-
-# DATE ONLY
-# Example: 2026-04-06
-if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
-        await update.message.reply_text(
-        f"Scanning full F&O for {text}"
-    )
-
-    results = full_scan()
-
-    if results:
-        for result in results:
-            await update.message.reply_text(format_result(result))
-    else:
-        await update.message.reply_text("No setups found.")
-    return
-
-        await update.message.reply_text("Invalid command. Use /start")
-
+# =========================================================
+# TELEGRAM APP
+# =========================================================
 
 telegram_app = Application.builder().token(BOT_TOKEN).build()
 telegram_app.add_handler(CommandHandler("start", start))
-telegram_app.add_handler(
-    MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message)
-)
+telegram_app.add_handler(MessageHandler(filters.TEXT, handle))
 
-
-@app.route("/")
-def home():
-    return "Bot Running Successfully"
-
+# =========================================================
+# WEBHOOK
+# =========================================================
 
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def webhook():
-    update_data = request.get_json(force=True)
-    update = Update.de_json(update_data, bot)
+    data = request.get_json(force=True)
+    update = Update.de_json(data, bot)
 
-    # SAFE async handling for Render
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
-
-    loop.run_until_complete(
-        telegram_app.process_update(update)
-    )
+    loop.run_until_complete(telegram_app.process_update(update))
 
     return "ok"
 
 
-if __name__ == "__main__":
-    print("🤖 HYBRID BOT RUNNING...")
+@app.route("/")
+def home():
+    return "Bot Running"
 
-    app.run(
-        host="0.0.0.0",
-        port=PORT
-    )
-        
+# =========================================================
+# RUN
+# =========================================================
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=PORT)
