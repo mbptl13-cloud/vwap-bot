@@ -8,225 +8,39 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 # CONFIG
 # =========================
 
-DEFAULT_STOCKS = [
-    "360ONE.NS",
-    "ABB.NS",
-    "APLAPOLLO.NS",
-    "AUBANK.NS",
-    "ADANIENSOL.NS",
-    "ADANIENT.NS",
-    "ADANIGREEN.NS",
-    "ADANIPORTS.NS",
-    "ADANIPOWER.NS",
-    "ABCAPITAL.NS",
-    "ALKEM.NS",
-    "AMBER.NS",
-    "AMBUJACEM.NS",
-    "ANGELONE.NS",
-    "APOLLOHOSP.NS",
-    "ASHOKLEY.NS",
-    "ASIANPAINT.NS",
-    "ASTRAL.NS",
-    "AUROPHARMA.NS",
-    "DMART.NS",
-    "AXISBANK.NS",
-    "BSE.NS",
-    "BAJAJ-AUTO.NS",
-    "BAJFINANCE.NS",
-    "BAJAJFINSV.NS",
-    "BAJAJHLDNG.NS",
-    "BANDHANBNK.NS",
-    "BANKBARODA.NS",
-    "BANKINDIA.NS",
-    "BDL.NS",
-    "BEL.NS",
-    "BHARATFORG.NS",
-    "BHEL.NS",
-    "BPCL.NS",
-    "BHARTIARTL.NS",
-    "BIOCON.NS",
-    "BLUESTARCO.NS",
-    "BOSCHLTD.NS",
-    "BRITANNIA.NS",
-    "CGPOWER.NS",
-    "CANBK.NS",
-    "CDSL.NS",
-    "CHOLAFIN.NS",
-    "CIPLA.NS",
-    "COALINDIA.NS",
-    "COCHINSHIP.NS",
-    "COFORGE.NS",
-    "COLPAL.NS",
-    "CAMS.NS",
-    "CONCOR.NS",
-    "CROMPTON.NS",
-    "CUMMINSIND.NS",
-    "DLF.NS",
-    "DABUR.NS",
-    "DALBHARAT.NS",
-    "DELHIVERY.NS",
-    "DIVISLAB.NS",
-    "DIXON.NS",
-    "DRREDDY.NS",
-    "ETERNAL.NS",
-    "EICHERMOT.NS",
-    "EXIDEIND.NS",
-    "FORCEMOT.NS",
-    "NYKAA.NS",
-    "FORTIS.NS",
-    "GAIL.NS",
-    "GMRAIRPORT.NS",
-    "GLENMARK.NS",
-    "GODFRYPHLP.NS",
-    "GODREJCP.NS",
-    "GODREJPROP.NS",
-    "GRASIM.NS",
-    "HCLTECH.NS",
-    "HDFCAMC.NS",
-    "HDFCBANK.NS",
-    "HDFCLIFE.NS",
-    "HAVELLS.NS",
-    "HEROMOTOCO.NS",
-    "HINDALCO.NS",
-    "HAL.NS",
-    "HINDPETRO.NS",
-    "HINDUNILVR.NS",
-    "HINDZINC.NS",
-    "POWERINDIA.NS",
-    "HUDCO.NS",
-    "HYUNDAI.NS",
-    "ICICIBANK.NS",
-    "ICICIGI.NS",
-    "ICICIPRULI.NS",
-    "IDFCFIRSTB.NS",
-    "ITC.NS",
-    "INDIANB.NS",
-    "IEX.NS",
-    "IOC.NS",
-    "IRFC.NS",
-    "IREDA.NS",
-    "INDUSTOWER.NS",
-    "INDUSINDBK.NS",
-    "NAUKRI.NS",
-    "INFY.NS",
-    "INOXWIND.NS",
-    "INDIGO.NS",
-    "JINDALSTEL.NS",
-    "JSWENERGY.NS",
-    "JSWSTEEL.NS",
-    "JIOFIN.NS",
-    "JUBLFOOD.NS",
-    "KEI.NS",
-    "KPITTECH.NS",
-    "KALYANKJIL.NS",
-    "KAYNES.NS",
-    "KFINTECH.NS",
-    "KOTAKBANK.NS",
-    "LTF.NS",
-    "LICHSGFIN.NS",
-    "LTM.NS",
-    "LT.NS",
-    "LAURUSLABS.NS",
-    "LICI.NS",
-    "LODHA.NS",
-    "LUPIN.NS",
-    "M&M.NS",
-    "MANAPPURAM.NS",
-    "MANKIND.NS",
-    "MARICO.NS",
-    "MARUTI.NS",
-    "MFSL.NS",
-    "MAXHEALTH.NS",
-    "MAZDOCK.NS",
-    "MOTILALOFS.NS",
-    "MPHASIS.NS",
-    "MCX.NS",
-    "MUTHOOTFIN.NS",
-    "NBCC.NS",
-    "NHPC.NS",
-    "NMDC.NS",
-    "NTPC.NS",
-    "NATIONALUM.NS",
-    "NESTLEIND.NS",
-    "NAM-INDIA.NS",
-    "NUVAMA.NS",
-    "OBEROIRLTY.NS",
-    "ONGC.NS",
-    "OIL.NS",
-    "PAYTM.NS",
-    "OFSS.NS",
-    "POLICYBZR.NS",
-    "PGEL.NS",
-    "PIIND.NS",
-    "PNBHOUSING.NS",
-    "PAGEIND.NS",
-    "PATANJALI.NS",
-    "PERSISTENT.NS",
-    "PETRONET.NS",
-    "PIDILITIND.NS",
-    "PPLPHARMA.NS",
-    "POLYCAB.NS",
-    "PFC.NS",
-    "POWERGRID.NS",
-    "PREMIERENE.NS",
-    "PRESTIGE.NS",
-    "PNB.NS",
-    "RBLBANK.NS",
-    "RECLTD.NS",
-    "RVNL.NS",
-    "RELIANCE.NS",
-    "SBICARD.NS",
-    "SBILIFE.NS",
-    "SHREECEM.NS",
-    "SRF.NS",
-    "SAMMAANCAP.NS",
-    "MOTHERSON.NS",
-    "SHRIRAMFIN.NS",
-    "SIEMENS.NS",
-    "SOLARINDS.NS",
-    "SONACOMS.NS",
-    "SBIN.NS",
-    "SAIL.NS",
-    "SUNPHARMA.NS",
-    "SUPREMEIND.NS",
-    "SUZLON.NS",
-    "SWIGGY.NS",
-    "TATACONSUM.NS",
-    "TVSMOTOR.NS",
-    "TCS.NS",
-    "TATAELXSI.NS",
-    "TMPV.NS",
-    "TATAPOWER.NS",
-    "TATASTEEL.NS",
-    "TATATECH.NS",
-    "TECHM.NS",
-    "FEDERALBNK.NS",
-    "INDHOTEL.NS",
-    "PHOENIXLTD.NS",
-    "TITAN.NS",
-    "TORNTPHARM.NS",
-    "TORNTPOWER.NS",
-    "TRENT.NS",
-    "TIINDIA.NS",
-    "UNOMINDA.NS",
-    "UPL.NS",
-    "ULTRACEMCO.NS",
-    "UNIONBANK.NS",
-    "UNITDSPR.NS",
-    "VBL.NS",
-    "VEDL.NS",
-    "VMM.NS",
-    "IDEA.NS",
-    "VOLTAS.NS",
-    "WAAREEENER.NS",
-    "WIPRO.NS",
-    "YESBANK.NS",
-    "ZYDUSLIFE.NS"
-]
 BOT_TOKEN = "8689896067:AAEEwtTtnagl6Djls_gkqW2lSY5Mo7GSpco"
 
+DEFAULT_STOCKS = [
+    "360ONE.NS","ABB.NS","APLAPOLLO.NS","AUBANK.NS","ADANIENT.NS",
+    "ADANIGREEN.NS","ADANIPORTS.NS","ADANIPOWER.NS","AXISBANK.NS",
+    "BAJFINANCE.NS","BEL.NS","BHEL.NS","BPCL.NS","BHARTIARTL.NS",
+    "CIPLA.NS","COALINDIA.NS","DLF.NS","DRREDDY.NS","EICHERMOT.NS",
+    "HDFCBANK.NS","ICICIBANK.NS","INFY.NS","ITC.NS","KOTAKBANK.NS",
+    "LT.NS","MARUTI.NS","M&M.NS","NESTLEIND.NS","NTPC.NS",
+    "ONGC.NS","POWERGRID.NS","RELIANCE.NS","SBIN.NS","SUNPHARMA.NS",
+    "TATAMOTORS.NS","TATASTEEL.NS","TCS.NS","TECHM.NS","WIPRO.NS"
+]
+
 # =========================
-# DATA FETCH
+# HELPERS
+# =========================
+
+def safe_float(x):
+    try:
+        if pd.isna(x):
+            return None
+        return float(x)
+    except:
+        return None
+
+
+def calculate_vwap(df):
+    df = df.copy()
+    df["VWAP"] = (df["Close"] * df["Volume"]).cumsum() / df["Volume"].cumsum()
+    return df
+
+# =========================
+# DATA
 # =========================
 
 def get_data(stock, interval, start, end):
@@ -235,98 +49,119 @@ def get_data(stock, interval, start, end):
     return df
 
 # =========================
-# VWAP
+# 15M RADAR (INSTITUTIONAL FILTER)
 # =========================
 
-def add_vwap(df):
-    df = df.copy()
-    if df.empty:
-        return df
-    df["vwap"] = (df["Close"] * df["Volume"]).cumsum() / df["Volume"].cumsum()
-    return df
-
-# =========================
-# 15M RADAR
-# =========================
-
-def radar_15m(df):
-    if df.empty or len(df) < 20:
+def radar_15m(df15):
+    if df15.empty or len(df15) < 20:
         return False, None
 
-    df = add_vwap(df)
+    df15 = calculate_vwap(df15)
+    df15["vol_sma_20"] = df15["Volume"].rolling(20).mean()
 
-    last = df.iloc[-1]
-    vol_avg = df["Volume"].rolling(10).mean().iloc[-1]
+    valid_15m = []
 
-    condition = (
-        last["Close"] > last["vwap"] and
-        last["Volume"] > vol_avg
-    )
+    for idx, row in df15.iterrows():
 
-    return condition, df.index[-1]
+        if idx.time() <= pd.to_datetime("09:30").time():
+            continue
+
+        o = safe_float(row["Open"])
+        h = safe_float(row["High"])
+        l = safe_float(row["Low"])
+        c = safe_float(row["Close"])
+        v = safe_float(row["Volume"])
+        vwap = safe_float(row["VWAP"])
+        vol_sma = safe_float(row["vol_sma_20"])
+
+        if None in [o, h, l, c, v, vwap]:
+            continue
+
+        candle_range = h - l
+        if candle_range <= 0:
+            continue
+
+        body = abs(c - o)
+
+        cond1 = v > 500000
+        cond2 = (c * v) > 150000000
+        cond3 = (candle_range / o) * 100 > 1
+        cond4 = (body / o) * 100 > 0.6
+        cond5 = c > vwap
+        cond6 = vol_sma is not None and v > (2 * vol_sma)
+        cond7 = c > o
+
+        if cond1 and cond2 and cond3 and cond4 and cond5 and cond6 and cond7:
+            valid_15m.append(idx)
+
+    if not valid_15m:
+        return False, None
+
+    return True, valid_15m[-1]
 
 # =========================
-# 5M ENTRY
+# 5M ENTRY (VWAP PRICE ACTION)
 # =========================
 
-def entry_5m(df):
-    if df.empty or len(df) < 20:
+def entry_5m(df5):
+    if df5.empty or len(df5) < 20:
         return False, None, None
 
-    df = add_vwap(df)
-    last = df.iloc[-1]
+    df5 = calculate_vwap(df5)
 
-    condition = last["Close"] > last["vwap"]
+    for i in range(2, len(df5)):
 
-    return condition, df.index[-1], last["Close"]
+        prev = df5.iloc[i-1]
+        curr = df5.iloc[i]
+
+        o = safe_float(curr["Open"])
+        c = safe_float(curr["Close"])
+        vwap = safe_float(curr["VWAP"])
+
+        prev_c = safe_float(prev["Close"])
+        prev_vwap = safe_float(prev["VWAP"])
+
+        if None in [o, c, vwap, prev_c, prev_vwap]:
+            continue
+
+        cond1 = c > vwap
+        cond2 = prev_c < prev_vwap
+        cond3 = c > o
+
+        if cond1 and cond2 and cond3:
+            return True, df5.index[i], c
+
+    return False, None, None
 
 # =========================
 # CORE ENGINE
 # =========================
 
-def find_trade(stock, df_15m, df_5m):
+def find_trade(stock, df15, df5):
 
     result = {
         "stock": stock,
-        "radar_alert": "NO",
-        "trigger_15m": None,
-        "five_min_entry": "NO",
-        "entry_time": None,
-        "entry": None,
-        "sl": None,
-        "target": None,
-        "score": "0/5",
-        "result": "NO_TRADE"
+        "radar": "NO",
+        "entry": "NO",
+        "time_15m": None,
+        "time_5m": None,
+        "price": None
     }
 
-    radar, t15 = radar_15m(df_15m)
+    radar, t15 = radar_15m(df15)
 
     if not radar:
         return result
 
-    result["radar_alert"] = "YES"
-    result["trigger_15m"] = str(t15)
+    result["radar"] = "YES"
+    result["time_15m"] = str(t15)
 
-    score = 3
-
-    entry, t5, price = entry_5m(df_5m)
+    entry, t5, price = entry_5m(df5)
 
     if entry:
-        result["five_min_entry"] = "YES"
-        result["entry_time"] = str(t5)
-
-        entry_price = price
-        sl = entry_price * 0.988
-        target = entry_price * 1.03
-
-        result["entry"] = round(entry_price, 2)
-        result["sl"] = round(sl, 2)
-        result["target"] = round(target, 2)
-
-        score += 2
-        result["result"] = "TRADE"
-
-    result["score"] = f"{score}/5"
+        result["entry"] = "YES"
+        result["time_5m"] = str(t5)
+        result["price"] = round(price, 2)
 
     return result
 
@@ -334,19 +169,18 @@ def find_trade(stock, df_15m, df_5m):
 # SCANNER
 # =========================
 
-def scan(stocks, start, end):
-
+def scan(date):
     results = []
 
-    for stock in stocks:
+    for stock in DEFAULT_STOCKS:
         try:
-            df_15m = get_data(stock, "15m", start, end)
-            df_5m = get_data(stock, "5m", start, end)
+            df15 = get_data(stock, "15m", date, date)
+            df5 = get_data(stock, "5m", date, date)
 
-            if df_15m.empty or df_5m.empty:
+            if df15.empty or df5.empty:
                 continue
 
-            results.append(find_trade(stock, df_15m, df_5m))
+            results.append(find_trade(stock, df15, df5))
 
         except Exception as e:
             print("Error:", stock, e)
@@ -357,84 +191,65 @@ def scan(stocks, start, end):
 # MODES
 # =========================
 
-def live_scan(date="2026-04-06"):
-    return scan(DEFAULT_STOCKS, date, date)
+def live_scan():
+    today = pd.Timestamp.today().date().isoformat()
+    return scan(today)
 
 
 def backtest(date):
-    return scan(DEFAULT_STOCKS, date, date)
+    return scan(date)
 
 
-def single_stock(stock, date):
-    return scan([stock], date, date)
-
-
-def range_backtest(stock, start, end):
-    return scan([stock], start, end)
+def radar_only(date):
+    data = scan(date)
+    return [x for x in data if x["radar"] == "YES"]
 
 # =========================
-# RADAR ONLY
-# =========================
-
-def radar_only(stock, date):
-
-    df_15m = get_data(stock, "15m", date, date)
-    df_5m = get_data(stock, "5m", date, date)
-
-    radar, t15 = radar_15m(df_15m)
-
-    if radar:
-        entry, t5, price = entry_5m(df_5m)
-
-        if entry:
-            return {
-                "stock": stock,
-                "radar": "YES",
-                "time_15m": str(t15),
-                "time_5m": str(t5),
-                "status": "TRADE CONFIRMED"
-            }
-
-        return {
-            "stock": stock,
-            "radar": "YES",
-            "time_15m": str(t15),
-            "status": "WAIT 5M"
-        }
-
-    return {"stock": stock, "radar": "NO"}
-
-# =========================
-# TELEGRAM BOT
+# TELEGRAM
 # =========================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🚀 Hybrid Radar Bot Ready\nUse /live to scan")
+    await update.message.reply_text("🚀 Radar Bot Ready\nCommands: /live /backtest /radar")
+
 
 async def live(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("🔍 Scanning market...")
+    await update.message.reply_text("🔍 Running Live Scan...")
 
-    signals = live_scan()
+    results = live_scan()
 
-    if not signals:
-        await update.message.reply_text("No signals ❌")
-        return
-
-    for s in signals:
+    for r in results:
         msg = f"""
-📡 {s['stock']}
-⚡ RADAR: {s['radar_alert']}
-⏱ 15M: {s['trigger_15m']}
-🎯 ENTRY: {s['five_min_entry']}
-📊 SCORE: {s['score']}
-💰 ENTRY: {s['entry']}
-🛑 SL: {s['sl']}
-🚀 TARGET: {s['target']}
+📡 {r['stock']}
+RADAR: {r['radar']}
+ENTRY: {r['entry']}
+15M: {r['time_15m']}
+5M: {r['time_5m']}
+PRICE: {r['price']}
 """
         await update.message.reply_text(msg)
 
+
+async def backtest_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    date = context.args[0] if context.args else None
+    if not date:
+        await update.message.reply_text("Send date like /backtest 2026-04-06")
+        return
+
+    results = backtest(date)
+    await update.message.reply_text(str(results))
+
+
+async def radar_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    date = context.args[0] if context.args else None
+    if not date:
+        await update.message.reply_text("Send date like /radar 2026-04-06")
+        return
+
+    results = radar_only(date)
+    await update.message.reply_text(str(results))
+
 # =========================
-# RUN BOT
+# MAIN (RENDER SAFE)
 # =========================
 
 def main():
@@ -442,13 +257,13 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("live", live))
+    app.add_handler(CommandHandler("backtest", backtest_cmd))
+    app.add_handler(CommandHandler("radar", radar_cmd))
 
-    print("Bot running...")
-    app.run_polling()
+    print("Bot Running...")
 
-# =========================
-# TEST MODE
-# =========================
+    app.run_polling(drop_pending_updates=True)
+
 
 if __name__ == "__main__":
     main()
