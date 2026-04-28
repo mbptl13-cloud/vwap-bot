@@ -457,7 +457,7 @@ async def webhook():
 # =========================
 
 async def set_webhook():
-    await app.bot.set_webhook(f"{WEBHOOK_URL}/")
+    await app.bot.set_webhook(f"https://vwap-bot-ia6r.onrender.com/")
     print("Webhook set:", WEBHOOK_URL)
 
 # =========================
