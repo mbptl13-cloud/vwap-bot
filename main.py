@@ -566,10 +566,21 @@ def webhook():
 
 
 if __name__ == "__main__":
-    telegram_app.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}",
-        secret_token=None,
+    print("🤖 HYBRID BOT RUNNING...")
+
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
+    loop.run_until_complete(
+        telegram_app.initialize()
+    )
+
+    loop.run_until_complete(
+        telegram_app.start()
+    )
+
+    app.run(
+        host="0.0.0.0",
+        port=PORT
     )
     
