@@ -275,199 +275,282 @@ def get_data(stock, interval, start=None, end=None):
 
 
 # =========================================
-# 15M RADAR LOGIC
-# CHECK FROM 09:45 TO 13:30
+# FINAL WORKING LOGIC
+# 15M FIRST → THEN 5M ENTRY
+# USING YOUR WORKING STRUCTURE
 # =========================================
 
-def radar_15m(df15):
-    if df15.empty or len(df15) < 20:
-        return False, None
-
-    df15 = add_vwap(df15)
-
-    # 20 candle avg volume
-    df15["vol_sma_20"] = df15["Volume"].rolling(20).mean()
-
-    valid_15m_times = []
-
-    for idx, row in df15.iterrows():
-
-        current_time = idx.time()
-
-        # ONLY CHECK BETWEEN 09:45 → 13:30
-        if current_time < pd.to_datetime("09:45").time():
-            continue
-
-        if current_time > pd.to_datetime("13:30").time():
-            continue
-
-        try:
-            o = float(row["Open"])
-            h = float(row["High"])
-            l = float(row["Low"])
-            c = float(row["Close"])
-            v = float(row["Volume"])
-
-            # lowercase vwap
-            vwap_15m = float(row["vwap"])
-
-            vol_sma = row["vol_sma_20"]
-
-        except Exception as e:
-            print("15M ERROR:", e)
-            continue
-
-        candle_range = h - l
-
-        if candle_range <= 0:
-            continue
-
-        body = abs(c - o)
+def find_trade(df15, df5, stock):
+    try:
+        if df15.empty or df5.empty:
+            return {
+                "stock": stock,
+                "radar": False,
+                "entry": False,
+                "t15": None,
+                "t5": None,
+                "entry_price": None,
+                "sl": None,
+                "target": None,
+                "result": "NO DATA"
+            }
 
         # =========================
-        # 15M CONDITIONS
+        # ADD VWAP
         # =========================
 
-        # 1. Volume > 5L
-        cond1 = v > 500000
-
-        # 2. Value traded > 15 Cr
-        cond2 = (c * v) > 150000000
-
-        # 3. Candle range > 1%
-        range_pct = (candle_range / o) * 100
-        cond3 = range_pct > 1
-
-        # 4. Candle body > 0.6%
-        body_pct = (body / o) * 100
-        cond4 = body_pct > 0.6
-
-        # 5. Close above VWAP
-        cond5 = c > vwap_15m
-
-        # 6. Volume spike
-        cond6 = (
-            pd.notna(vol_sma)
-            and v > (1.3 * vol_sma)
-        )
-
-        # 7. Bullish candle
-        cond7 = c > o
-
-        print(
-            f"{idx} | "
-            f"C1:{cond1} "
-            f"C2:{cond2} "
-            f"C3:{cond3} "
-            f"C4:{cond4} "
-            f"C5:{cond5} "
-            f"C6:{cond6} "
-            f"C7:{cond7}"
-        )
-
-        # FINAL FILTER
-        if (
-            cond1 and cond2 and cond3
-            and cond4 and cond5
-            and cond6 and cond7
-        ):
-            valid_15m_times.append(idx)
-
-    if not valid_15m_times:
-        return False, None
-
-    # FIRST VALID CANDLE
-    return True, valid_15m_times[0]
-
-
-# =========================================
-# 5M ENTRY LOGIC
-# VWAP + PRICE ACTION
-# CHECK ONLY AFTER 15M TRIGGER
-# =========================================
-
-def entry_5m(df5, trigger_15m_time):
-    if df5.empty or len(df5) < 10:
-        return False, None, None
-
-    df5 = add_vwap(df5)
-
-    valid_5m_entries = []
-
-    for idx, row in df5.iterrows():
-
-        # ONLY AFTER 15M SIGNAL
-        if idx <= trigger_15m_time:
-            continue
-
-        try:
-            o = float(row["Open"])
-            h = float(row["High"])
-            l = float(row["Low"])
-            c = float(row["Close"])
-
-            # lowercase vwap
-            vwap_5m = float(row["vwap"])
-
-        except Exception as e:
-            print("5M ERROR:", e)
-            continue
-
-        candle_range = h - l
-
-        if candle_range <= 0:
-            continue
-
-        body = abs(c - o)
-        upper_wick = h - max(o, c)
+        df15 = add_vwap(df15)
+        df5 = add_vwap(df5)
 
         # =========================
-        # 5M CONDITIONS
+        # DAY HIGH
         # =========================
 
-        # 1. Close above VWAP
-        cond1 = c > vwap_5m
+        day_high = df15["High"].max()
 
-        # 2. Bullish candle
-        cond2 = c > o
+        # =========================
+        # LOOP THROUGH 5M CANDLES
+        # =========================
 
-        # 3. Strong body
-        body_pct = (body / o) * 100
-        cond3 = body_pct > 0.25
+        for i in range(1, len(df5)):
 
-        # 4. VWAP rejection
-        cond4 = (
-            l <= vwap_5m
-            and c > vwap_5m
-        )
+            current_time = df5.index[i]
 
-        # 5. Small upper wick
-        cond5 = upper_wick < body
+            # =====================================
+            # ENTRY WINDOW → 09:45 to 13:30
+            # =====================================
 
-        print(
-            f"5M {idx} | "
-            f"C1:{cond1} "
-            f"C2:{cond2} "
-            f"C3:{cond3} "
-            f"C4:{cond4} "
-            f"C5:{cond5}"
-        )
+            if (
+                current_time.time() < pd.to_datetime("09:45").time()
+                or
+                current_time.time() > pd.to_datetime("13:30").time()
+            ):
+                continue
 
-        # FINAL ENTRY FILTER
-        if (
-            cond1 and cond2 and cond3
-            and cond4 and cond5
-        ):
-            valid_5m_entries.append((idx, c))
+            # =====================================
+            # ALL 15M CANDLES BEFORE CURRENT 5M TIME
+            # =====================================
 
-    if not valid_5m_entries:
-        return False, None, None
+            df15_valid = df15[
+                df15.index <= current_time
+            ]
 
-    # FIRST VALID ENTRY
-    entry_time = valid_5m_entries[0][0]
-    entry_price = valid_5m_entries[0][1]
+            valid_15m_times = []
 
-    return True, entry_time, round(entry_price, 2)
+            # =====================================
+            # 15M CHECK FIRST
+            # =====================================
+
+            for idx, row15 in df15_valid.iterrows():
+
+                # Ignore 09:30 and before
+                if idx.time() <= pd.to_datetime("09:30").time():
+                    continue
+
+                try:
+                    o = float(row15["Open"])
+                    h = float(row15["High"])
+                    l = float(row15["Low"])
+                    c = float(row15["Close"])
+                    v = float(row15["Volume"])
+                    vwap = float(row15["vwap"])
+
+                except:
+                    continue
+
+                candle_range = h - l
+
+                if candle_range <= 0:
+                    continue
+
+                body = abs(c - o)
+
+                # =====================================
+                # FULL 15M CONDITIONS
+                # =====================================
+
+                cond1 = v > 500000
+
+                cond2 = (c * v) > 150000000
+
+                range_pct = (candle_range / o) * 100
+                cond3 = range_pct > 1
+
+                body_pct = (body / o) * 100
+                cond4 = body_pct > 0.6
+
+                cond5 = c > vwap
+
+                cond6 = (
+                    v > df15["Volume"].mean() * 1.5
+                )
+
+                cond7 = c > o
+
+                if (
+                    cond1 and cond2 and cond3
+                    and cond4 and cond5
+                    and cond6 and cond7
+                ):
+                    valid_15m_times.append(idx)
+
+            # =====================================
+            # NO 15M → NO TRADE
+            # =====================================
+
+            if not valid_15m_times:
+                continue
+
+            # LAST VALID 15M SIGNAL
+            trigger_time = valid_15m_times[-1]
+
+            last15 = df15.loc[trigger_time]
+
+            # =====================================
+            # NO SAME CANDLE ENTRY
+            # =====================================
+
+            if current_time <= trigger_time:
+                continue
+
+            # =====================================
+            # ENTRY MUST BE WITHIN 60 MIN
+            # =====================================
+
+            if (
+                current_time - trigger_time
+            ) > pd.Timedelta(minutes=60):
+                continue
+
+            # =====================================
+            # NOW CHECK 5M ENTRY
+            # =====================================
+
+            row = df5.iloc[i]
+            prev = df5.iloc[i - 1]
+
+            try:
+                # VWAP Pullback
+                condA = (
+                    row["Low"] <= row["vwap"] * 1.002
+                    and
+                    row["Close"] > row["vwap"]
+                )
+
+                # Breakout Candle
+                condB = (
+                    row["Close"] > prev["High"]
+                    and
+                    row["Close"] > row["Open"]
+                )
+
+                if not condA:
+                    continue
+
+                if not condB:
+                    continue
+
+                # =====================================
+                # ENTRY / SL / TARGET
+                # =====================================
+
+                entry = float(row["Close"])
+                sl = float(row["vwap"])
+
+                # Minimum SL Filter
+                min_risk = entry * 0.003
+                actual_risk = entry - sl
+
+                if actual_risk < min_risk:
+                    continue
+
+                target = entry + (actual_risk * 2)
+
+                # =====================================
+                # RESULT CHECK
+                # =====================================
+
+                result = "OPEN"
+
+                for j in range(i + 1, len(df5)):
+                    future = df5.iloc[j]
+
+                    if future["Low"] <= sl:
+                        result = "LOSS"
+                        break
+
+                    elif future["High"] >= target:
+                        result = "WIN"
+                        break
+
+                # =====================================
+                # FINAL RETURN
+                # =====================================
+
+                return {
+                    "stock": stock,
+                    "radar": True,
+                    "entry": True,
+                    "t15": str(trigger_time),
+                    "t5": str(current_time),
+                    "entry_price": round(entry, 2),
+                    "sl": round(sl, 2),
+                    "target": round(target, 2),
+                    "result": result
+                }
+
+            except Exception as e:
+                print("5M ERROR:", e)
+                continue
+
+        # =====================================
+        # ONLY RADAR FOUND / NO ENTRY
+        # =====================================
+
+        if len(valid_15m_times) > 0:
+            return {
+                "stock": stock,
+                "radar": True,
+                "entry": False,
+                "t15": str(valid_15m_times[-1]),
+                "t5": None,
+                "entry_price": None,
+                "sl": None,
+                "target": None,
+                "result": "WAITING FOR 5M"
+            }
+
+        # =====================================
+        # NO SIGNAL
+        # =====================================
+
+        return {
+            "stock": stock,
+            "radar": False,
+            "entry": False,
+            "t15": None,
+            "t5": None,
+            "entry_price": None,
+            "sl": None,
+            "target": None,
+            "result": "NO TRADE"
+        }
+
+    except Exception as e:
+        print("FIND TRADE ERROR:", e)
+
+        return {
+            "stock": stock,
+            "radar": False,
+            "entry": False,
+            "t15": None,
+            "t5": None,
+            "entry_price": None,
+            "sl": None,
+            "target": None,
+            "result": "ERROR"
+        }
+
 
 # =========================
 # CORE SCAN
