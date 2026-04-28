@@ -532,7 +532,7 @@ if re.fullmatch(r"[A-Z]+\s\d{4}-\d{2}-\d{2}", text):
     stock = parts[0] + ".NS"
     scan_date = parts[1]
 
-    await update.message.reply_text(
+        await update.message.reply_text(
         f"Scanning {stock} for {scan_date}"
     )
 
@@ -550,7 +550,7 @@ if re.fullmatch(r"[A-Z]+\s\d{4}-\d{2}-\d{2}", text):
 if re.fullmatch(r"\d{4}-\d{2}-\d{2}\sRADAR", text):
     scan_date = text.replace(" RADAR", "")
 
-    await update.message.reply_text(
+        await update.message.reply_text(
         f"Scanning Radar only for {scan_date}"
     )
 
@@ -573,7 +573,7 @@ if re.fullmatch(r"\d{4}-\d{2}-\d{2}\sRADAR", text):
 # DATE ONLY
 # Example: 2026-04-06
 if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
-    await update.message.reply_text(
+        await update.message.reply_text(
         f"Scanning full F&O for {text}"
     )
 
@@ -586,7 +586,7 @@ if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
         await update.message.reply_text("No setups found.")
     return
 
-    await update.message.reply_text("Invalid command. Use /start")
+        await update.message.reply_text("Invalid command. Use /start")
 
 
 telegram_app = Application.builder().token(BOT_TOKEN).build()
