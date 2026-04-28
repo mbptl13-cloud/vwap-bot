@@ -381,23 +381,96 @@ async def live(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(msg)
 
-async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.upper()
+def parse_input(text):
 
-    # KEEP YOUR INPUTS AS THEY ARE
+    text = text.strip().upper()
+
     if text in ["LIVE", "RADAR TODAY"]:
+        return {"type": "live"}
+
+    if "RADAR" in text and len(text.split()) == 2:
+        return {"type": "radar_date", "date": text.split()[0]}
+
+    if "TO" in text:
+        parts = text.split()
+        return {
+            "type": "range",
+            "stock": parts[0],
+            "start": parts[1],
+            "end": parts[3]
+        }
+
+    parts = text.split()
+    if len(parts) == 2:
+        return {
+            "type": "single",
+            "stock": parts[0],
+            "date": parts[1]
+        }
+
+    return {"type": "invalid"}
+async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    text = update.message.text
+    print("INPUT:", text)
+
+    req = parse_input(text)
+
+    if req["type"] == "live":
         await live(update, context)
         return
 
-    if "RADAR" in text:
-        await update.message.reply_text(f"📡 RADAR MODE: {text}")
+    if req["type"] == "radar_date":
+        await update.message.reply_text(f"📡 RADAR MODE ACTIVE: {req['date']}")
         return
 
-    if "TO" in text:
-        await update.message.reply_text(f"📊 RANGE BACKTEST: {text}")
+    if req["type"] == "range":
+
+        stock = req["stock"]
+
+        await update.message.reply_text(
+            f"📊 RANGE BACKTEST RUNNING...\n{stock} {req['start']} → {req['end']}"
+        )
+
+        result = scan_stock(stock + ".NS")
+
+        await update.message.reply_text(
+            f"""📊 RANGE RESULT
+Stock: {stock}
+From: {req['start']}
+To: {req['end']}
+RADAR: {result['radar']}
+ENTRY: {result['entry']}
+15M TIME: {result['t15']}
+5M TIME: {result['t5']}
+PRICE: {result['price']}"""
+        )
         return
 
-    await update.message.reply_text(f"📊 BACKTEST INPUT RECEIVED: {text}")
+    if req["type"] == "single":
+
+        stock = req["stock"]
+        date = req["date"]
+
+        await update.message.reply_text(
+            f"📊 BACKTEST RUNNING...\n{stock} {date}"
+        )
+
+        result = scan_stock(stock + ".NS")
+
+        await update.message.reply_text(
+            f"""📊 BACKTEST RESULT
+Stock: {stock}
+Date: {date}
+RADAR: {result['radar']}
+ENTRY: {result['entry']}
+15M TIME: {result['t15']}
+5M TIME: {result['t5']}
+PRICE: {result['price']}"""
+        )
+        return
+
+    await update.message.reply_text("❌ INVALID INPUT FORMAT")
 
 # =========================
 # REGISTER
