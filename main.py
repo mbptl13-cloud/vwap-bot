@@ -167,7 +167,7 @@ def find_trade(stock, date):
                 if risk > 0:
                     best_target = round(best_entry + (risk * 2), 2)
 
-            if score >= 2:
+            if score >= 1:
                 five_min_entry = "YES"
 
         return {
