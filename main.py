@@ -5,7 +5,7 @@ import pandas as pd
 import yfinance as yf
 from flask import Flask, request
 from telegram import Update, Bot
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+import requests
 
 # =========================================================
 # CONFIG
@@ -243,14 +243,24 @@ def webhook():
     print("🔥 WEBHOOK HIT")
 
     data = request.get_json(force=True)
-    update = Update.de_json(data, bot)
 
-    # SAFE EXECUTION (NO Application lifecycle issues)
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    message = data.get("message", {})
+    chat_id = message.get("chat", {}).get("id")
+    text = message.get("text", "")
 
-    loop.run_until_complete(
-        telegram_app.process_update(update)
+    print("MESSAGE:", text)
+
+    if not chat_id:
+        return "ok"
+
+    reply = "Command received: " + text
+
+    requests.post(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+        json={
+            "chat_id": chat_id,
+            "text": reply
+        }
     )
 
     return "ok"
