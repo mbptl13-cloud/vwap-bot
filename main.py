@@ -12,7 +12,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 # =========================================================
 
 BOT_TOKEN = "8689896067:AAEuHnXG8f7orhfygCKvHoDItQmJTqzGGB4"
-RENDER_URL = "https://vwap-bot-ia6r.onrender.com"
+url = "https://vwap-bot-ia6r.onrender.com"
 PORT = int(os.environ.get("PORT", 10000))
 
 app = Flask(__name__)
@@ -23,13 +23,16 @@ bot = Bot(token=BOT_TOKEN)
 # =========================================================
 
 def set_webhook():
-    url = f"{RENDER_URL}/{BOT_TOKEN}"
+    url = f"{RENDER_URL}/webhook"
     try:
         import requests
+
         r = requests.get(
             f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook?url={url}"
         )
+
         print("Webhook set:", r.text)
+
     except Exception as e:
         print("Webhook error:", e)
 
@@ -234,7 +237,7 @@ telegram_app.add_handler(MessageHandler(filters.TEXT, handle))
 # WEBHOOK
 # =========================================================
 
-@app.route(f"/{BOT_TOKEN}", methods=["POST"])
+@app.route("/webhook", methods=["POST"])
 def webhook():
     print("🔥 WEBHOOK HIT")   # <--- MUST SEE THIS
 
