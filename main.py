@@ -10,6 +10,9 @@ from telegram.ext import Application, CommandHandler, ContextTypes
 
 BOT_TOKEN = "8689896067:AAEEwtTtnagl6Djls_gkqW2lSY5Mo7GSpco"
 
+if not BOT_TOKEN or "PASTE" in BOT_TOKEN:
+    raise Exception("BOT_TOKEN NOT SET PROPERLY")
+
 DEFAULT_STOCKS = [
     "360ONE.NS","ABB.NS","APLAPOLLO.NS","AUBANK.NS","ADANIENT.NS",
     "ADANIGREEN.NS","ADANIPORTS.NS","ADANIPOWER.NS","AXISBANK.NS",
