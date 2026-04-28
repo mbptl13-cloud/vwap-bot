@@ -525,12 +525,66 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("No radar found today.")
         return
 
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2}(\s+RADAR)?", text):
-        await update.message.reply_text(
-            f"Scanning full F&O for {text}"
-        )
+    # STOCK + DATE
+# Example: BHEL 2026-04-06
+if re.fullmatch(r"[A-Z]+\s\d{4}-\d{2}-\d{2}", text):
+    parts = text.split()
+    stock = parts[0] + ".NS"
+    scan_date = parts[1]
 
-        results = full_scan()
+    await update.message.reply_text(
+        f"Scanning {stock} for {scan_date}"
+    )
+
+    result = scan_stock(stock)
+
+    if result:
+        await update.message.reply_text(format_result(result))
+    else:
+        await update.message.reply_text("No setup found.")
+    return
+
+
+# DATE + RADAR
+# Example: 2026-04-06 RADAR
+if re.fullmatch(r"\d{4}-\d{2}-\d{2}\sRADAR", text):
+    scan_date = text.replace(" RADAR", "")
+
+    await update.message.reply_text(
+        f"Scanning Radar only for {scan_date}"
+    )
+
+    results = full_scan()
+    radar_lines = []
+
+    for result in results:
+        if result.get("radar"):
+            radar_lines.append(
+                f"{result['symbol']} → {result['radar']['time']}"
+            )
+
+    if radar_lines:
+        await update.message.reply_text("\n".join(radar_lines))
+    else:
+        await update.message.reply_text("No radar setups found.")
+    return
+
+
+# DATE ONLY
+# Example: 2026-04-06
+if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+    await update.message.reply_text(
+        f"Scanning full F&O for {text}"
+    )
+
+    results = full_scan()
+
+    if results:
+        for result in results:
+            await update.message.reply_text(format_result(result))
+    else:
+        await update.message.reply_text("No setups found.")
+    return
 
         if results:
             for result in results:
