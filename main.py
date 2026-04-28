@@ -1,68 +1,14 @@
-# FINAL ZERO-ERROR VWAP TELEGRAM BOT
-# Commands Supported:
-# LIVE
-# 2026-04-06
-# 2026-04-06 15M
-# VEDL 2026-04-27
-# VEDL 2026-04-21 to 2026-04-27
-
-import os
-import asyncio
 import pandas as pd
+import numpy as np
 import yfinance as yf
-
-from datetime import datetime, timedelta
-from flask import Flask
-from threading import Thread
-
 from telegram import Update
-from telegram.ext import (
-    ApplicationBuilder,
-    MessageHandler,
-    ContextTypes,
-    filters,
-)
+from telegram.ext import Application, CommandHandler, ContextTypes
 
-BOT_TOKEN = "8578450014:AAHQ_Eu9C-XIxRXD1760WL_1UQtVP4dbQW4"
+# =========================
+# CONFIG
+# =========================
 
-if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN not found")
-
-# ---------------- FLASK KEEP ALIVE ----------------
-app_web = Flask(__name__)
-
-@app_web.route("/")
-def home():
-    return "VWAP Bot Running"
-
-
-def run_web():
-    port = int(os.environ.get("PORT", 10000))
-    app_web.run(host="0.0.0.0", port=port)
-
-
-def keep_alive():
-    t = Thread(target=run_web)
-    t.start()
-
-
-# ---------------- HELPERS ----------------
-def safe_float(value):
-    try:
-        return float(value)
-    except:
-        return None
-
-
-def calculate_vwap(df):
-    df = df.copy()
-    df["cum_vol"] = df["Volume"].cumsum()
-    df["cum_vp"] = (df["Close"] * df["Volume"]).cumsum()
-    df["VWAP"] = df["cum_vp"] / df["cum_vol"]
-    return df
-
-
-WATCHLIST = [
+DEFAULT_STOCKS = [
     "360ONE.NS",
     "ABB.NS",
     "APLAPOLLO.NS",
@@ -277,258 +223,233 @@ WATCHLIST = [
     "YESBANK.NS",
     "ZYDUSLIFE.NS"
 ]
+BOT_TOKEN = "8578450014:AAHQ_Eu9C-XIxRXD1760WL_1UQtVP4dbQW4"
 
+# =========================
+# DATA FETCH
+# =========================
 
-# ---------------- MAIN STRATEGY ----------------
-def find_trade(stock, date):
-    try:
-        start = date
-        end = pd.to_datetime(date) + timedelta(days=1)
+def get_data(stock, interval, start, end):
+    df = yf.download(stock, interval=interval, start=start, end=end, progress=False)
+    df.dropna(inplace=True)
+    return df
 
-        df15 = yf.download(
-            stock,
-            interval="15m",
-            start=start,
-            end=end,
-            progress=False,
-            auto_adjust=True,
-        )
+# =========================
+# VWAP
+# =========================
 
-        df5 = yf.download(
-            stock,
-            interval="5m",
-            start=start,
-            end=end,
-            progress=False,
-            auto_adjust=True,
-        )
+def add_vwap(df):
+    df = df.copy()
+    if df.empty:
+        return df
+    df["vwap"] = (df["Close"] * df["Volume"]).cumsum() / df["Volume"].cumsum()
+    return df
 
-        if len(df15) < 5 or len(df5) < 10:
-            return None
+# =========================
+# 15M RADAR
+# =========================
 
-        if df15.index.tz is not None:
-            df15.index = df15.index.tz_convert("Asia/Kolkata").tz_localize(None)
+def radar_15m(df):
+    if df.empty or len(df) < 20:
+        return False, None
 
-        if df5.index.tz is not None:
-            df5.index = df5.index.tz_convert("Asia/Kolkata").tz_localize(None)
+    df = add_vwap(df)
 
-        df5 = calculate_vwap(df5)
+    last = df.iloc[-1]
+    vol_avg = df["Volume"].rolling(10).mean().iloc[-1]
 
-        valid_15m = []
-        for idx, row in df15.iterrows():
-            if idx.time() <= pd.to_datetime("09:30").time():
+    condition = (
+        last["Close"] > last["vwap"] and
+        last["Volume"] > vol_avg
+    )
+
+    return condition, df.index[-1]
+
+# =========================
+# 5M ENTRY
+# =========================
+
+def entry_5m(df):
+    if df.empty or len(df) < 20:
+        return False, None, None
+
+    df = add_vwap(df)
+    last = df.iloc[-1]
+
+    condition = last["Close"] > last["vwap"]
+
+    return condition, df.index[-1], last["Close"]
+
+# =========================
+# CORE ENGINE
+# =========================
+
+def find_trade(stock, df_15m, df_5m):
+
+    result = {
+        "stock": stock,
+        "radar_alert": "NO",
+        "trigger_15m": None,
+        "five_min_entry": "NO",
+        "entry_time": None,
+        "entry": None,
+        "sl": None,
+        "target": None,
+        "score": "0/5",
+        "result": "NO_TRADE"
+    }
+
+    radar, t15 = radar_15m(df_15m)
+
+    if not radar:
+        return result
+
+    result["radar_alert"] = "YES"
+    result["trigger_15m"] = str(t15)
+
+    score = 3
+
+    entry, t5, price = entry_5m(df_5m)
+
+    if entry:
+        result["five_min_entry"] = "YES"
+        result["entry_time"] = str(t5)
+
+        entry_price = price
+        sl = entry_price * 0.988
+        target = entry_price * 1.03
+
+        result["entry"] = round(entry_price, 2)
+        result["sl"] = round(sl, 2)
+        result["target"] = round(target, 2)
+
+        score += 2
+        result["result"] = "TRADE"
+
+    result["score"] = f"{score}/5"
+
+    return result
+
+# =========================
+# SCANNER
+# =========================
+
+def scan(stocks, start, end):
+
+    results = []
+
+    for stock in stocks:
+        try:
+            df_15m = get_data(stock, "15m", start, end)
+            df_5m = get_data(stock, "5m", start, end)
+
+            if df_15m.empty or df_5m.empty:
                 continue
 
-            o = safe_float(row["Open"])
-            c = safe_float(row["Close"])
-            v = safe_float(row["Volume"])
+            results.append(find_trade(stock, df_15m, df_5m))
 
-            if None in [o, c, v]:
-                continue
+        except Exception as e:
+            print("Error:", stock, e)
 
-            if c > o and v > 100000:
-                valid_15m.append(idx.strftime("%H:%M"))
+    return results
 
-        if not valid_15m:
-            return None
+# =========================
+# MODES
+# =========================
 
-        best_time = None
-        best_score = 0
-        best_entry = "-"
-        best_sl = "-"
-        best_target = "-"
-        five_min_entry = "NO"
+def live_scan(date="2026-04-06"):
+    return scan(DEFAULT_STOCKS, date, date)
 
-        for i in range(2, len(df5)):
-            row = df5.iloc[i]
-            prev = df5.iloc[i - 1]
 
-            low = safe_float(row["Low"])
-            high = safe_float(row["High"])
-            close = safe_float(row["Close"])
-            vwap = safe_float(row["VWAP"])
-            prev_high = safe_float(prev["High"])
+def backtest(date):
+    return scan(DEFAULT_STOCKS, date, date)
 
-            if None in [low, high, close, vwap, prev_high]:
-                continue
 
-            score = 0
+def single_stock(stock, date):
+    return scan([stock], date, date)
 
-            if low <= vwap * 1.002:
-                score += 1
-            if close > vwap:
-                score += 1
-            if close > prev_high:
-                score += 1
 
-            if score > best_score:
-                best_score = score
-                best_time = df5.index[i].strftime("%H:%M")
-                best_entry = round(close, 2)
-                best_sl = round(vwap, 2)
-                risk = best_entry - best_sl
-                if risk > 0:
-                    best_target = round(best_entry + (risk * 2), 2)
+def range_backtest(stock, start, end):
+    return scan([stock], start, end)
 
-            if score >= 2:
-                five_min_entry = "YES"
+# =========================
+# RADAR ONLY
+# =========================
+
+def radar_only(stock, date):
+
+    df_15m = get_data(stock, "15m", date, date)
+    df_5m = get_data(stock, "5m", date, date)
+
+    radar, t15 = radar_15m(df_15m)
+
+    if radar:
+        entry, t5, price = entry_5m(df_5m)
+
+        if entry:
+            return {
+                "stock": stock,
+                "radar": "YES",
+                "time_15m": str(t15),
+                "time_5m": str(t5),
+                "status": "TRADE CONFIRMED"
+            }
 
         return {
             "stock": stock,
-            "valid_15m_count": len(valid_15m),
-            "trigger_times": ", ".join(valid_15m),
-            "five_min_entry": five_min_entry,
-            "best_5m_time": best_time or "None",
-            "best_score": f"{best_score}/3",
-            "entry": best_entry,
-            "sl": best_sl,
-            "target": best_target,
+            "radar": "YES",
+            "time_15m": str(t15),
+            "status": "WAIT 5M"
         }
 
-    except Exception as e:
-        print("ERROR:", str(e))
-        return None
+    return {"stock": stock, "radar": "NO"}
 
+# =========================
+# TELEGRAM BOT
+# =========================
 
-def full_date_scan(date):
-    results = []
-    for stock in WATCHLIST:
-        result = find_trade(stock, date)
-        if result:
-            results.append(result)
-    return results
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🚀 Hybrid Radar Bot Ready\nUse /live to scan")
 
+async def live(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🔍 Scanning market...")
 
-def range_scan(stock, start_date, end_date):
-    results = []
-    current = pd.to_datetime(start_date)
-    end = pd.to_datetime(end_date)
+    signals = live_scan()
 
-    while current <= end:
-        day = current.strftime("%Y-%m-%d")
-        result = find_trade(stock, day)
-        if result:
-            result["date"] = day
-            results.append(result)
-        current += timedelta(days=1)
-
-    return results
-
-
-# ---------------- TELEGRAM ----------------
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip().upper()
-
-    if text == "LIVE":
-        await update.message.reply_text("Use:\nLIVE\n2026-04-06\n2026-04-06 15M\nVEDL 2026-04-27\nVEDL 2026-04-21 to 2026-04-27")
+    if not signals:
+        await update.message.reply_text("No signals ❌")
         return
 
-    if len(text.split()) == 2 and text.split()[1] == "15M":
-        scan_date = text.split()[0]
-        results = full_date_scan(scan_date)
-
-        if not results:
-            await update.message.reply_text("❌ No 15M setups found")
-            return
-
-        msg = f"🔥 15M FILTER RESULT - {scan_date}\n\n"
-        for r in results:
-            msg += (
-                f"{r['stock']}\n"
-                f"15M Count: {r['valid_15m_count']}\n"
-                f"15M Trigger: {r['trigger_times']}\n"
-                f"5M Entry: {r['five_min_entry']}\n"
-                f"5M Time: {r['best_5m_time']}\n\n"
-            )
-
+    for s in signals:
+        msg = f"""
+📡 {s['stock']}
+⚡ RADAR: {s['radar_alert']}
+⏱ 15M: {s['trigger_15m']}
+🎯 ENTRY: {s['five_min_entry']}
+📊 SCORE: {s['score']}
+💰 ENTRY: {s['entry']}
+🛑 SL: {s['sl']}
+🚀 TARGET: {s['target']}
+"""
         await update.message.reply_text(msg)
-        return
 
-    if " TO " in text:
-        parts = text.split()
-        if len(parts) == 4:
-            stock = parts[0] + ".NS"
-            start_date = parts[1]
-            end_date = parts[3]
+# =========================
+# RUN BOT
+# =========================
 
-            results = range_scan(stock, start_date, end_date)
+def main():
+    app = Application.builder().token(BOT_TOKEN).build()
 
-            if not results:
-                await update.message.reply_text("❌ No trades found")
-                return
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("live", live))
 
-            msg = f"🔥 RANGE RESULT - {stock}\n\n"
-            for r in results:
-                msg += (
-                    f"Date: {r['date']}\n"
-                    f"15M Count: {r['valid_15m_count']}\n"
-                    f"5M Entry: {r['five_min_entry']}\n"
-                    f"5M Time: {r['best_5m_time']}\n\n"
-                )
+    print("Bot running...")
+    app.run_polling()
 
-            await update.message.reply_text(msg)
-            return
-
-    parts = text.split()
-    if len(parts) == 2 and len(parts[1]) == 10:
-        stock = parts[0] + ".NS"
-        date = parts[1]
-
-        result = find_trade(stock, date)
-
-        if not result:
-            await update.message.reply_text("❌ No trade found")
-            return
-
-        msg = (
-            f"{result['stock']}\n"
-            f"15M Count: {result['valid_15m_count']}\n"
-            f"15M Trigger: {result['trigger_times']}\n"
-            f"5M Entry: {result['five_min_entry']}\n"
-            f"5M Time: {result['best_5m_time']}\n"
-            f"Score: {result['best_score']}\n"
-            f"Entry: {result['entry']}\n"
-            f"SL: {result['sl']}\n"
-            f"TGT: {result['target']}"
-        )
-
-        await update.message.reply_text(msg)
-        return
-
-    if len(text) == 10 and text.count("-") == 2:
-        results = full_date_scan(text)
-
-        if not results:
-            await update.message.reply_text("❌ No trades found")
-            return
-
-        msg = f"🔥 DATE RESULT - {text}\n\n"
-        for r in results:
-            msg += f"{r['stock']} | 15M: {r['trigger_times']} | 5M: {r['five_min_entry']}\n"
-
-        await update.message.reply_text(msg)
-        return
-
-    await update.message.reply_text(
-        "Use:\nLIVE\n2026-04-06\n2026-04-06 15M\nVEDL 2026-04-27\nVEDL 2026-04-21 to 2026-04-27"
-    )
-
-
-async def main():
-    print("BOT RUNNING...")
-    keep_alive()
-
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling(drop_pending_updates=True)
-
-    while True:
-        await asyncio.sleep(3600)
-
+# =========================
+# TEST MODE
+# =========================
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
     
