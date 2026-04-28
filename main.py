@@ -262,78 +262,214 @@ def get_data(stock, interval, start, end):
         return pd.DataFrame()
 
 
-# =========================
-# 15M LOGIC (UNCHANGED)
-# =========================
+# =====================================
+# 15M RADAR CONDITION
+# CHECK TIME = 09:45 TO 13:30
+# =====================================
 
 def radar_15m(df):
     if df.empty or len(df) < 20:
         return False, None
 
     df = add_vwap(df)
-    df["vol_sma_20"] = df["Volume"].rolling(20).mean()
 
-    valid = []
+    df["vol_sma_20"] = (
+        df["Volume"].rolling(20).mean()
+    )
+
+    valid_15m = []
 
     for idx, row in df.iterrows():
+
+        current_time = idx.time()
+
+        # =====================================
+        # ONLY CHECK BETWEEN 09:45 → 13:30
+        # =====================================
+
+        if current_time < pd.to_datetime("09:45").time():
+            continue
+
+        if current_time > pd.to_datetime("13:30").time():
+            continue
+
         try:
             o = float(row["Open"])
             h = float(row["High"])
             l = float(row["Low"])
             c = float(row["Close"])
             v = float(row["Volume"])
-            vwap = float(row["VWAP"])
+            vwap_15m = float(row["VWAP"])
             vol_sma = row["vol_sma_20"]
+
         except:
             continue
 
-        if idx.time() <= pd.to_datetime("09:30").time():
-            continue
-
         candle_range = h - l
+
         if candle_range <= 0:
             continue
 
         body = abs(c - o)
 
+        # =====================================
+        # 15M CONDITIONS
+        # =====================================
+
+        # Condition 1 → High Volume
         cond1 = v > 500000
+
+        # Condition 2 → Value Traded
         cond2 = (c * v) > 150000000
-        cond3 = (candle_range / o) * 100 > 1
-        cond4 = (body / o) * 100 > 0.6
-        cond5 = c > vwap
-        cond6 = vol_sma is not None and v > (2 * vol_sma)
+
+        # Condition 3 → Candle Range > 1%
+        range_pct = (candle_range / o) * 100
+        cond3 = range_pct > 1
+
+        # Condition 4 → Candle Body > 0.6%
+        body_pct = (body / o) * 100
+        cond4 = body_pct > 0.6
+
+        # Condition 5 → Close Above VWAP
+        cond5 = c > vwap_15m
+
+        # Condition 6 → Volume Spike
+        cond6 = (
+            pd.notna(vol_sma)
+            and v > (2 * vol_sma)
+        )
+
+        # Condition 7 → Bullish Candle
         cond7 = c > o
 
-        if cond1 and cond2 and cond3 and cond4 and cond5 and cond6 and cond7:
-            valid.append(idx)
+        # =====================================
+        # DEBUG PRINT
+        # =====================================
 
-    if not valid:
+        print(
+            f"{idx} | "
+            f"C1:{cond1} "
+            f"C2:{cond2} "
+            f"C3:{cond3} "
+            f"C4:{cond4} "
+            f"C5:{cond5} "
+            f"C6:{cond6} "
+            f"C7:{cond7}"
+        )
+
+        # =====================================
+        # FINAL FILTER
+        # =====================================
+
+        if (
+            cond1 and cond2 and cond3
+            and cond4 and cond5
+            and cond6 and cond7
+        ):
+            valid_15m.append(idx)
+
+    if not valid_15m:
         return False, None
 
-    return True, valid[-1]
+    # FIRST VALID CANDLE
+    return True, valid_15m[0]
 
-# =========================
-# 5M LOGIC (UNCHANGED)
-# =========================
 
-def entry_5m(df):
+# =====================================
+# 5M VWAP PRICE ACTION ENTRY
+# CHECK AFTER 15M RADAR TRIGGER
+# =====================================
+
+def entry_5m(df, trigger_15m_time):
     if df.empty or len(df) < 10:
         return False, None, None
 
     df = add_vwap(df)
 
-    for i in range(1, len(df)):
-        prev = df.iloc[i - 1]
-        curr = df.iloc[i]
+    valid_5m = []
+
+    for idx, row in df.iterrows():
+
+        current_time = idx.time()
+
+        # =====================================
+        # ONLY CHECK AFTER 15M TRIGGER
+        # =====================================
+
+        if idx <= trigger_15m_time:
+            continue
+
+        try:
+            o = float(row["Open"])
+            h = float(row["High"])
+            l = float(row["Low"])
+            c = float(row["Close"])
+            vwap_5m = float(row["VWAP"])
+
+        except:
+            continue
+
+        candle_range = h - l
+
+        if candle_range <= 0:
+            continue
+
+        body = abs(c - o)
+
+        upper_wick = h - max(o, c)
+        lower_wick = min(o, c) - l
+
+        # =====================================
+        # 5M VWAP PRICE ACTION CONDITIONS
+        # =====================================
+
+        # Condition 1 → Price Above VWAP
+        cond1 = c > vwap_5m
+
+        # Condition 2 → Bullish Candle
+        cond2 = c > o
+
+        # Condition 3 → Strong Body
+        body_pct = (body / o) * 100
+        cond3 = body_pct > 0.25
+
+        # Condition 4 → Rejection from VWAP
+        cond4 = l <= vwap_5m and c > vwap_5m
+
+        # Condition 5 → Small Upper Wick
+        cond5 = upper_wick < body
+
+        # =====================================
+        # DEBUG PRINT
+        # =====================================
+
+        print(
+            f"5M {idx} | "
+            f"C1:{cond1} "
+            f"C2:{cond2} "
+            f"C3:{cond3} "
+            f"C4:{cond4} "
+            f"C5:{cond5}"
+        )
+
+        # =====================================
+        # FINAL ENTRY FILTER
+        # =====================================
 
         if (
-            curr["Close"] > curr["VWAP"] and
-            prev["Close"] < prev["VWAP"] and
-            curr["Close"] > curr["Open"]
+            cond1 and cond2 and cond3
+            and cond4 and cond5
         ):
-            return True, df.index[i], float(curr["Close"])
+            valid_5m.append((idx, c))
 
-    return False, None, None
+    if not valid_5m:
+        return False, None, None
+
+    # FIRST VALID ENTRY
+    entry_time = valid_5m[0][0]
+    entry_price = valid_5m[0][1]
+
+    return True, entry_time, round(entry_price, 2)
 
 # =========================
 # CORE SCAN
