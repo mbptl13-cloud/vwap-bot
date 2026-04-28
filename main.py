@@ -3,6 +3,25 @@ import re
 import requests
 import pandas as pd
 import yfinance as yf
+import pytz  # (optional but safe)
+
+def to_ist(df):
+    if df is None:
+        return None
+
+    df = df.copy()
+    df.index = pd.to_datetime(df.index)
+
+    try:
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("UTC")
+
+        df.index = df.index.tz_convert("Asia/Kolkata")
+
+    except:
+        pass
+
+    return df
 from flask import Flask, request
 
 # =========================
@@ -151,7 +170,7 @@ def scan_stock(symbol):
     if symbol in TRADED_TODAY:
         return None
 
-    df15 = get_data(symbol, "15m")
+    df15 = to_list(get_data(symbol, "15m"))
     if df15 is None:
         return None
 
@@ -161,7 +180,7 @@ def scan_stock(symbol):
 
     RADAR_STATE[symbol] = radar
 
-    df5 = get_data(symbol, "5m")
+    df5 = to_get(get_data(symbol, "5m"))
     trade = check_5m(df5, radar["time"]) if df5 is not None else None
 
     if trade:
