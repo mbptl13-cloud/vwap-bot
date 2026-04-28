@@ -340,43 +340,61 @@ def entry_5m(df):
 # =========================
 
 def scan_stock(stock, date=None):
+    try:
+        if date:
+            start = pd.to_datetime(date).strftime("%Y-%m-%d")
+            end = (
+                pd.to_datetime(date) + pd.Timedelta(days=1)
+            ).strftime("%Y-%m-%d")
+        else:
+            start = None
+            end = None
 
-    if date:
-        start = date
-        end = (
-            pd.to_datetime(date) + pd.Timedelta(days=1)
-        ).strftime("%Y-%m-%d")
-    else:
-        start = None
-        end = None
-
-    if date:
         df15 = get_data(stock, "15m", start, end)
         df5 = get_data(stock, "5m", start, end)
-    else:
-        df15 = get_data(stock, "15m", None, None)
-        df5 = get_data(stock, "5m", None, None)
 
-    radar, t15 = radar_15m(df15)
+        if df15.empty or df5.empty:
+            return {
+                "stock": stock,
+                "radar": False,
+                "entry": False,
+                "t15": None,
+                "t5": None,
+                "price": None
+            }
 
-    result = {
-        "stock": stock,
-        "radar": radar,
-        "entry": False,
-        "t15": str(t15) if radar else None,
-        "t5": None,
-        "price": None
-    }
+        radar, t15 = radar_15m(df15)
 
-    if radar:
-        entry, t5, price = entry_5m(df5)
+        result = {
+            "stock": stock,
+            "radar": radar,
+            "entry": False,
+            "t15": str(t15) if radar else None,
+            "t5": None,
+            "price": None
+        }
 
-        if entry:
-            result["entry"] = True
-            result["t5"] = str(t5)
-            result["price"] = round(price, 2)
+        if radar:
+            entry, t5, price = entry_5m(df5)
 
-    return result
+            if entry:
+                result["entry"] = True
+                result["t5"] = str(t5)
+                result["price"] = round(price, 2)
+
+        return result
+
+    except Exception as e:
+        print("SCAN ERROR:", stock, e)
+
+        return {
+            "stock": stock,
+            "radar": False,
+            "entry": False,
+            "t15": None,
+            "t5": None,
+            "price": None
+        }
 
 def live_scan():
     return [scan_stock(s) for s in STOCKS]
@@ -449,96 +467,149 @@ def parse_input(text):
     return {"type": "invalid"}
 
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    text = update.message.text
+    text = update.message.text.strip().upper()
     print("INPUT:", text)
 
     req = parse_input(text)
 
+    # =========================
+    # LIVE MODE
+    # =========================
     if req["type"] == "live":
+        await update.message.reply_text("📡 LIVE SCAN STARTED...")
         await live(update, context)
+        return
+
     # =========================
     # DATE ONLY BACKTEST
     # Example: 2026-04-06
     # =========================
     if req["type"] == "date_only":
-
         date = req["date"]
 
         await update.message.reply_text(
-            f"📊 FULL MARKET BACKTEST RUNNING...\nDate: {date}"
+            f"📊 FULL MARKET BACKTEST STARTED...\nDate: {date}"
         )
 
-        results = live_scan()
+        try:
+            results = []
 
-        msg = f"📊 BACKTEST RESULT ({date})\n\n"
+            for stock in STOCKS:
+                result = scan_stock(stock, date)
+                if result["radar"]:
+                    results.append(result)
 
-        for r in results:
-            if r["radar"]:
+            if not results:
+                await update.message.reply_text(
+                    f"❌ No radar signals found for {date}"
+                )
+                return
+
+            msg = f"📊 BACKTEST RESULT ({date})\n\n"
+
+            for r in results[:15]:
                 msg += (
                     f"{r['stock']} | "
                     f"RADAR:{r['radar']} | "
                     f"ENTRY:{r['entry']}\n"
                 )
 
-        if msg == f"📊 BACKTEST RESULT ({date})\n\n":
-            msg += "No valid radar signals found"
+            await update.message.reply_text(msg)
 
-        await update.message.reply_text(msg)
+        except Exception as e:
+            await update.message.reply_text(
+                f"❌ BACKTEST ERROR: {str(e)}"
+            )
         return
-    return
 
+    # =========================
+    # RADAR DATE MODE
+    # Example: 2026-04-06 RADAR
+    # =========================
     if req["type"] == "radar_date":
-        await update.message.reply_text(f"📡 RADAR MODE ACTIVE: {req['date']}")
+        await update.message.reply_text(
+            f"📡 RADAR MODE ACTIVE\nDate: {req['date']}"
+        )
         return
 
+    # =========================
+    # RANGE BACKTEST
+    # Example:
+    # BHEL 2026-04-01 to 2026-04-20
+    # =========================
     if req["type"] == "range":
-
         stock = req["stock"]
+        start = req["start"]
+        end = req["end"]
 
         await update.message.reply_text(
-            f"📊 RANGE BACKTEST RUNNING...\n{stock} {req['start']} → {req['end']}"
+            f"📊 RANGE BACKTEST STARTED...\n{stock}\n{start} → {end}"
         )
 
-        result = scan_stock(stock + ".NS", date)
+        try:
+            result = scan_stock(stock + ".NS", start)
 
-        await update.message.reply_text(
-            f"""📊 RANGE RESULT
+            await update.message.reply_text(
+                f"""📊 RANGE RESULT
+
 Stock: {stock}
-From: {req['start']}
-To: {req['end']}
+From: {start}
+To: {end}
+
 RADAR: {result['radar']}
 ENTRY: {result['entry']}
 15M TIME: {result['t15']}
 5M TIME: {result['t5']}
 PRICE: {result['price']}"""
-        )
+            )
+
+        except Exception as e:
+            await update.message.reply_text(
+                f"❌ RANGE ERROR: {str(e)}"
+            )
         return
 
+    # =========================
+    # SINGLE STOCK BACKTEST
+    # Example:
+    # ADANIGREEN 2026-04-06
+    # =========================
     if req["type"] == "single":
-
         stock = req["stock"]
         date = req["date"]
 
         await update.message.reply_text(
-            f"📊 BACKTEST RUNNING...\n{stock} {date}"
+            f"📊 BACKTEST STARTED...\nStock: {stock}\nDate: {date}"
         )
 
-        result = scan_stock(stock + ".NS")
+        try:
+            result = scan_stock(stock + ".NS", date)
 
-        await update.message.reply_text(
-            f"""📊 BACKTEST RESULT
+            await update.message.reply_text(
+                f"""📊 BACKTEST RESULT
+
 Stock: {stock}
 Date: {date}
+
 RADAR: {result['radar']}
 ENTRY: {result['entry']}
 15M TIME: {result['t15']}
 5M TIME: {result['t5']}
 PRICE: {result['price']}"""
-        )
+            )
+
+        except Exception as e:
+            await update.message.reply_text(
+                f"❌ SINGLE BACKTEST ERROR: {str(e)}"
+            )
         return
 
-    await update.message.reply_text("❌ INVALID INPUT FORMAT")
+    # =========================
+    # INVALID INPUT
+    # =========================
+    await update.message.reply_text(
+        "❌ INVALID INPUT FORMAT"
+    )
 
 # =========================
 # REGISTER
