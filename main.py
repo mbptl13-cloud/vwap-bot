@@ -385,12 +385,28 @@ def parse_input(text):
 
     text = text.strip().upper()
 
+    # LIVE MODE
     if text in ["LIVE", "RADAR TODAY"]:
         return {"type": "live"}
 
-    if "RADAR" in text and len(text.split()) == 2:
-        return {"type": "radar_date", "date": text.split()[0]}
+    # DATE ONLY BACKTEST
+    # Example: 2026-04-06
+    if len(text.split()) == 1 and "-" in text:
+        return {
+            "type": "date_only",
+            "date": text
+        }
 
+    # RADAR MODE
+    # Example: 2026-04-06 RADAR
+    if "RADAR" in text and len(text.split()) == 2:
+        return {
+            "type": "radar_date",
+            "date": text.split()[0]
+        }
+
+    # RANGE BACKTEST
+    # Example: BHEL 2026-04-01 TO 2026-04-20
     if "TO" in text:
         parts = text.split()
         return {
@@ -400,6 +416,8 @@ def parse_input(text):
             "end": parts[3]
         }
 
+    # SINGLE STOCK BACKTEST
+    # Example: BHEL 2026-04-06
     parts = text.split()
     if len(parts) == 2:
         return {
@@ -409,6 +427,7 @@ def parse_input(text):
         }
 
     return {"type": "invalid"}
+
 async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = update.message.text
@@ -418,7 +437,36 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if req["type"] == "live":
         await live(update, context)
+    # =========================
+    # DATE ONLY BACKTEST
+    # Example: 2026-04-06
+    # =========================
+    if req["type"] == "date_only":
+
+        date = req["date"]
+
+        await update.message.reply_text(
+            f"📊 FULL MARKET BACKTEST RUNNING...\nDate: {date}"
+        )
+
+        results = live_scan()
+
+        msg = f"📊 BACKTEST RESULT ({date})\n\n"
+
+        for r in results:
+            if r["radar"]:
+                msg += (
+                    f"{r['stock']} | "
+                    f"RADAR:{r['radar']} | "
+                    f"ENTRY:{r['entry']}\n"
+                )
+
+        if msg == f"📊 BACKTEST RESULT ({date})\n\n":
+            msg += "No valid radar signals found"
+
+        await update.message.reply_text(msg)
         return
+    return
 
     if req["type"] == "radar_date":
         await update.message.reply_text(f"📡 RADAR MODE ACTIVE: {req['date']}")
