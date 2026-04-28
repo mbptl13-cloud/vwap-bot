@@ -12,231 +12,32 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 # =========================================================
 
 BOT_TOKEN = "8689896067:AAEuHnXG8f7orhfygCKvHoDItQmJTqzGGB4"
-WEBHOOK_URL = "https://vwap-bot-ia6r.onrender.com"
+RENDER_URL = "https://vwap-bot-ia6r.onrender.com"
 PORT = int(os.environ.get("PORT", 10000))
 
 app = Flask(__name__)
 bot = Bot(token=BOT_TOKEN)
 
 # =========================================================
-# STOCK LIST (SHORT SAMPLE - ADD FULL IF NEEDED)
+# AUTO WEBHOOK SETUP (CRITICAL FIX)
 # =========================================================
 
-FNO_STOCKS = [
-    "360ONE.NS",
-    "ABB.NS",
-    "APLAPOLLO.NS",
-    "AUBANK.NS",
-    "ADANIENSOL.NS",
-    "ADANIENT.NS",
-    "ADANIGREEN.NS",
-    "ADANIPORTS.NS",
-    "ADANIPOWER.NS",
-    "ABCAPITAL.NS",
-    "ALKEM.NS",
-    "AMBER.NS",
-    "AMBUJACEM.NS",
-    "ANGELONE.NS",
-    "APOLLOHOSP.NS",
-    "ASHOKLEY.NS",
-    "ASIANPAINT.NS",
-    "ASTRAL.NS",
-    "AUROPHARMA.NS",
-    "DMART.NS",
-    "AXISBANK.NS",
-    "BSE.NS",
-    "BAJAJ-AUTO.NS",
-    "BAJFINANCE.NS",
-    "BAJAJFINSV.NS",
-    "BAJAJHLDNG.NS",
-    "BANDHANBNK.NS",
-    "BANKBARODA.NS",
-    "BANKINDIA.NS",
-    "BDL.NS",
-    "BEL.NS",
-    "BHARATFORG.NS",
-    "BHEL.NS",
-    "BPCL.NS",
-    "BHARTIARTL.NS",
-    "BIOCON.NS",
-    "BLUESTARCO.NS",
-    "BOSCHLTD.NS",
-    "BRITANNIA.NS",
-    "CGPOWER.NS",
-    "CANBK.NS",
-    "CDSL.NS",
-    "CHOLAFIN.NS",
-    "CIPLA.NS",
-    "COALINDIA.NS",
-    "COCHINSHIP.NS",
-    "COFORGE.NS",
-    "COLPAL.NS",
-    "CAMS.NS",
-    "CONCOR.NS",
-    "CROMPTON.NS",
-    "CUMMINSIND.NS",
-    "DLF.NS",
-    "DABUR.NS",
-    "DALBHARAT.NS",
-    "DELHIVERY.NS",
-    "DIVISLAB.NS",
-    "DIXON.NS",
-    "DRREDDY.NS",
-    "ETERNAL.NS",
-    "EICHERMOT.NS",
-    "EXIDEIND.NS",
-    "FORCEMOT.NS",
-    "NYKAA.NS",
-    "FORTIS.NS",
-    "GAIL.NS",
-    "GMRAIRPORT.NS",
-    "GLENMARK.NS",
-    "GODFRYPHLP.NS",
-    "GODREJCP.NS",
-    "GODREJPROP.NS",
-    "GRASIM.NS",
-    "HCLTECH.NS",
-    "HDFCAMC.NS",
-    "HDFCBANK.NS",
-    "HDFCLIFE.NS",
-    "HAVELLS.NS",
-    "HEROMOTOCO.NS",
-    "HINDALCO.NS",
-    "HAL.NS",
-    "HINDPETRO.NS",
-    "HINDUNILVR.NS",
-    "HINDZINC.NS",
-    "POWERINDIA.NS",
-    "HUDCO.NS",
-    "HYUNDAI.NS",
-    "ICICIBANK.NS",
-    "ICICIGI.NS",
-    "ICICIPRULI.NS",
-    "IDFCFIRSTB.NS",
-    "ITC.NS",
-    "INDIANB.NS",
-    "IEX.NS",
-    "IOC.NS",
-    "IRFC.NS",
-    "IREDA.NS",
-    "INDUSTOWER.NS",
-    "INDUSINDBK.NS",
-    "NAUKRI.NS",
-    "INFY.NS",
-    "INOXWIND.NS",
-    "INDIGO.NS",
-    "JINDALSTEL.NS",
-    "JSWENERGY.NS",
-    "JSWSTEEL.NS",
-    "JIOFIN.NS",
-    "JUBLFOOD.NS",
-    "KEI.NS",
-    "KPITTECH.NS",
-    "KALYANKJIL.NS",
-    "KAYNES.NS",
-    "KFINTECH.NS",
-    "KOTAKBANK.NS",
-    "LTF.NS",
-    "LICHSGFIN.NS",
-    "LTM.NS",
-    "LT.NS",
-    "LAURUSLABS.NS",
-    "LICI.NS",
-    "LODHA.NS",
-    "LUPIN.NS",
-    "M&M.NS",
-    "MANAPPURAM.NS",
-    "MANKIND.NS",
-    "MARICO.NS",
-    "MARUTI.NS",
-    "MFSL.NS",
-    "MAXHEALTH.NS",
-    "MAZDOCK.NS",
-    "MOTILALOFS.NS",
-    "MPHASIS.NS",
-    "MCX.NS",
-    "MUTHOOTFIN.NS",
-    "NBCC.NS",
-    "NHPC.NS",
-    "NMDC.NS",
-    "NTPC.NS",
-    "NATIONALUM.NS",
-    "NESTLEIND.NS",
-    "NAM-INDIA.NS",
-    "NUVAMA.NS",
-    "OBEROIRLTY.NS",
-    "ONGC.NS",
-    "OIL.NS",
-    "PAYTM.NS",
-    "OFSS.NS",
-    "POLICYBZR.NS",
-    "PGEL.NS",
-    "PIIND.NS",
-    "PNBHOUSING.NS",
-    "PAGEIND.NS",
-    "PATANJALI.NS",
-    "PERSISTENT.NS",
-    "PETRONET.NS",
-    "PIDILITIND.NS",
-    "PPLPHARMA.NS",
-    "POLYCAB.NS",
-    "PFC.NS",
-    "POWERGRID.NS",
-    "PREMIERENE.NS",
-    "PRESTIGE.NS",
-    "PNB.NS",
-    "RBLBANK.NS",
-    "RECLTD.NS",
-    "RVNL.NS",
-    "RELIANCE.NS",
-    "SBICARD.NS",
-    "SBILIFE.NS",
-    "SHREECEM.NS",
-    "SRF.NS",
-    "SAMMAANCAP.NS",
-    "MOTHERSON.NS",
-    "SHRIRAMFIN.NS",
-    "SIEMENS.NS",
-    "SOLARINDS.NS",
-    "SONACOMS.NS",
-    "SBIN.NS",
-    "SAIL.NS",
-    "SUNPHARMA.NS",
-    "SUPREMEIND.NS",
-    "SUZLON.NS",
-    "SWIGGY.NS",
-    "TATACONSUM.NS",
-    "TVSMOTOR.NS",
-    "TCS.NS",
-    "TATAELXSI.NS",
-    "TMPV.NS",
-    "TATAPOWER.NS",
-    "TATASTEEL.NS",
-    "TATATECH.NS",
-    "TECHM.NS",
-    "FEDERALBNK.NS",
-    "INDHOTEL.NS",
-    "PHOENIXLTD.NS",
-    "TITAN.NS",
-    "TORNTPHARM.NS",
-    "TORNTPOWER.NS",
-    "TRENT.NS",
-    "TIINDIA.NS",
-    "UNOMINDA.NS",
-    "UPL.NS",
-    "ULTRACEMCO.NS",
-    "UNIONBANK.NS",
-    "UNITDSPR.NS",
-    "VBL.NS",
-    "VEDL.NS",
-    "VMM.NS",
-    "IDEA.NS",
-    "VOLTAS.NS",
-    "WAAREEENER.NS",
-    "WIPRO.NS",
-    "YESBANK.NS",
-    "ZYDUSLIFE.NS"
-]
+def set_webhook():
+    url = f"{RENDER_URL}/{BOT_TOKEN}"
+    try:
+        import requests
+        r = requests.get(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/setWebhook?url={url}"
+        )
+        print("Webhook set:", r.text)
+    except Exception as e:
+        print("Webhook error:", e)
+
+# =========================================================
+# STOCK LIST (SHORT FOR SAFETY)
+# =========================================================
+
+FNO_STOCKS = ["RELIANCE.NS", "HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS", "BHEL.NS"]
 
 # =========================================================
 # DATA
@@ -247,8 +48,7 @@ def download_data(symbol, interval="5m", period="5d"):
         df = yf.download(symbol, interval=interval, period=period, progress=False)
         if df is None or df.empty:
             return None
-        df.dropna(inplace=True)
-        return df
+        return df.dropna()
     except:
         return None
 
@@ -270,7 +70,7 @@ def vwap(df):
     return (tp * df["Volume"]).cumsum() / df["Volume"].cumsum()
 
 # =========================================================
-# 15M RADAR
+# 15M LOGIC
 # =========================================================
 
 def check_15m(df):
@@ -296,7 +96,7 @@ def check_15m(df):
     return None
 
 # =========================================================
-# 5M TRADE
+# 5M LOGIC
 # =========================================================
 
 def check_5m(df, radar_time):
@@ -350,12 +150,12 @@ def scan_stock(symbol):
 
 
 def full_scan():
-    results = []
+    out = []
     for s in FNO_STOCKS:
         r = scan_stock(s)
         if r:
-            results.append(r)
-    return results
+            out.append(r)
+    return out
 
 # =========================================================
 # FORMAT
@@ -368,7 +168,7 @@ def format_result(r):
         t = r["trade"]
         msg += f"5M: {t['time']}\nEntry: {t['entry']}\nSL: {t['sl']}\nTarget: {t['target']}"
     else:
-        msg += "RADAR ACTIVE - Waiting 5M"
+        msg += "RADAR ACTIVE"
 
     return msg
 
@@ -377,53 +177,53 @@ def format_result(r):
 # =========================================================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🚀 Bot Ready\n\nCommands:\nLIVE\nRADAR TODAY\nBHEL 2026-04-06\n2026-04-06 RADAR\n2026-04-06"
-    )
+    print("START TRIGGERED")
+    await update.message.reply_text("🚀 Bot is LIVE (v2 stable)")
 
 
 async def handle(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip().upper()
+    try:
+        text = update.message.text.strip().upper()
+        print("MESSAGE:", text)
 
-    await update.message.reply_text(f"⏳ Processing: {text}")
+        await update.message.reply_text(f"Processing: {text}")
 
-    # LIVE
-    if text == "LIVE":
-        res = full_scan()
-        for r in res:
-            await update.message.reply_text(format_result(r))
-        return
+        if text == "LIVE":
+            res = full_scan()
+            for r in res:
+                await update.message.reply_text(format_result(r))
+            return
 
-    # RADAR TODAY
-    if text == "RADAR TODAY":
-        res = full_scan()
-        await update.message.reply_text("\n".join([r["symbol"] for r in res]))
-        return
+        if text == "RADAR TODAY":
+            res = full_scan()
+            await update.message.reply_text("\n".join([r["symbol"] for r in res]))
+            return
 
-    # STOCK + DATE
-    if re.fullmatch(r"[A-Z]+\s\d{4}-\d{2}-\d{2}", text):
-        stock = text.split()[0] + ".NS"
-        r = scan_stock(stock)
-        await update.message.reply_text(format_result(r) if r else "No setup")
-        return
+        if re.fullmatch(r"[A-Z]+\s\d{4}-\d{2}-\d{2}", text):
+            stock = text.split()[0] + ".NS"
+            r = scan_stock(stock)
+            await update.message.reply_text(format_result(r) if r else "No setup")
+            return
 
-    # DATE RADAR
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2}\sRADAR", text):
-        res = full_scan()
-        await update.message.reply_text("\n".join([r["symbol"] for r in res]))
-        return
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}\sRADAR", text):
+            res = full_scan()
+            await update.message.reply_text("\n".join([r["symbol"] for r in res]))
+            return
 
-    # DATE
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
-        res = full_scan()
-        for r in res:
-            await update.message.reply_text(format_result(r))
-        return
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+            res = full_scan()
+            for r in res:
+                await update.message.reply_text(format_result(r))
+            return
 
-    await update.message.reply_text("Invalid command")
+        await update.message.reply_text("Invalid command")
+
+    except Exception as e:
+        print("ERROR:", e)
+        await update.message.reply_text("Error occurred")
 
 # =========================================================
-# TELEGRAM APP
+# APP SETUP
 # =========================================================
 
 telegram_app = Application.builder().token(BOT_TOKEN).build()
@@ -436,6 +236,8 @@ telegram_app.add_handler(MessageHandler(filters.TEXT, handle))
 
 @app.route(f"/{BOT_TOKEN}", methods=["POST"])
 def webhook():
+    print("WEBHOOK HIT")
+
     data = request.get_json(force=True)
     update = Update.de_json(data, bot)
 
@@ -448,11 +250,15 @@ def webhook():
 
 @app.route("/")
 def home():
-    return "Bot Running"
+    return "Bot v2 Running"
 
 # =========================================================
-# RUN
+# STARTUP
 # =========================================================
 
 if __name__ == "__main__":
+    print("🚀 STARTING BOT v2")
+
+    set_webhook()
+
     app.run(host="0.0.0.0", port=PORT)
