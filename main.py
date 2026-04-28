@@ -21,6 +21,7 @@ app = Flask(__name__)
 bot = Bot(token=BOT_TOKEN)
 
 FNO_STOCKS = [
+    
     "360ONE.NS",
     "ABB.NS",
     "APLAPOLLO.NS",
@@ -571,3 +572,4 @@ if __name__ == "__main__":
         webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}",
         secret_token=None,
     )
+    
