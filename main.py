@@ -243,18 +243,24 @@ app = Application.builder().token(BOT_TOKEN).build()
 # DATA
 # =========================
 
-def get_data(stock, interval="15m", period="5d"):
+def get_data(stock, interval, start, end):
     try:
-        df = yf.download(stock, interval=interval, period=period, progress=False)
+        df = yf.download(
+            stock,
+            interval=interval,
+            start=start,
+            end=end,
+            progress=False,
+            auto_adjust=True
+        )
+
         df.dropna(inplace=True)
         return df
-    except:
+
+    except Exception as e:
+        print("DATA ERROR:", stock, e)
         return pd.DataFrame()
 
-def add_vwap(df):
-    df = df.copy()
-    df["VWAP"] = (df["Close"] * df["Volume"]).cumsum() / df["Volume"].cumsum()
-    return df
 
 # =========================
 # 15M LOGIC (UNCHANGED)
@@ -333,9 +339,23 @@ def entry_5m(df):
 # CORE SCAN
 # =========================
 
-def scan_stock(stock):
-    df15 = get_data(stock, "15m")
-    df5 = get_data(stock, "5m")
+def scan_stock(stock, date=None):
+
+    if date:
+        start = date
+        end = (
+            pd.to_datetime(date) + pd.Timedelta(days=1)
+        ).strftime("%Y-%m-%d")
+    else:
+        start = None
+        end = None
+
+    if date:
+        df15 = get_data(stock, "15m", start, end)
+        df5 = get_data(stock, "5m", start, end)
+    else:
+        df15 = get_data(stock, "15m", None, None)
+        df5 = get_data(stock, "5m", None, None)
 
     radar, t15 = radar_15m(df15)
 
@@ -480,7 +500,7 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"📊 RANGE BACKTEST RUNNING...\n{stock} {req['start']} → {req['end']}"
         )
 
-        result = scan_stock(stock + ".NS")
+        result = scan_stock(stock + ".NS", date)
 
         await update.message.reply_text(
             f"""📊 RANGE RESULT
