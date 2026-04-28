@@ -239,12 +239,13 @@ telegram_app.add_handler(MessageHandler(filters.TEXT, handle))
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    print("WEBHOOK HIT")
+    print("🔥 WEBHOOK HIT")
 
     data = request.get_json(force=True)
     update = Update.de_json(data, bot)
 
-    asyncio.run(handle_update(update))
+    # SAFE DIRECT CALL (NO ASYNC WRAPPER)
+    asyncio.run(telegram_app.process_update(update))
 
     return "ok"
 
