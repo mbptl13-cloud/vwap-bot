@@ -243,23 +243,35 @@ app = Application.builder().token(BOT_TOKEN).build()
 # DATA
 # =========================
 
-def get_data(stock, interval, start, end):
+def get_data(stock, interval, start=None, end=None):
     try:
+        print(f"DOWNLOADING: {stock} | {interval}")
+
         df = yf.download(
-            stock,
+            tickers=stock,
             interval=interval,
             start=start,
             end=end,
             progress=False,
-            auto_adjust=True
+            auto_adjust=False,
+            threads=False,
+            prepost=False
         )
 
+        if df is None or df.empty:
+            print(f"NO DATA: {stock} | {interval}")
+            return pd.DataFrame()
+
         df.dropna(inplace=True)
+
+        print(f"DATA OK: {stock} | {interval} | Rows: {len(df)}")
+
         return df
 
     except Exception as e:
-        print("DATA ERROR:", stock, e)
+        print(f"DOWNLOAD ERROR: {stock} | {interval} | {e}")
         return pd.DataFrame()
+
 
 
 # =========================================
