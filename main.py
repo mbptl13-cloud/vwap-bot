@@ -4,6 +4,7 @@ import requests
 import pandas as pd
 import yfinance as yf
 from flask import Flask, request
+from datetime import datetime, timedelta
 
 # =========================
 # CONFIG
@@ -17,7 +18,7 @@ PORT = int(os.environ.get("PORT", 10000))
 app = Flask(__name__)
 
 # =========================
-# STOCK LIST
+# STOCKS
 # =========================
 
 FNO_STOCKS = [
@@ -72,14 +73,12 @@ def to_ist(df):
     return df
 
 # =========================
-# SESSION FILTER (🔥 IMPORTANT)
+# SESSION FILTER (09:45–13:30)
 # =========================
 
 def session_filter(df):
     if df is None or df.empty:
         return None
-
-    df = df.copy()
 
     try:
         df = df.between_time("09:45", "13:30")
@@ -122,7 +121,7 @@ def filter_date(df, date):
     return df.drop(columns=["date"])
 
 # =========================
-# 15M RADAR
+# 15M RADAR (CLOSE CONFIRMED FIX)
 # =========================
 
 def check_15m(df):
@@ -141,7 +140,7 @@ def check_15m(df):
         if op <= 0:
             continue
 
-        if not (
+        cond = (
             c["Volume"] > 500000 and
             c["Volume"] * c["Close"] > 150000000 and
             ((c["High"] - c["Low"]) / op) * 100 > 0.6 and
@@ -149,18 +148,24 @@ def check_15m(df):
             c["Close"] > c["VWAP"] and
             c["Volume"] > 2 * c["VOL_SMA20"] and
             c["Close"] > c["Open"]
-        ):
-            continue
+        )
 
-        return {
-            "time": df.index[i],
-            "close": float(c["Close"])
-        }
+        if cond:
+
+            candle_open_time = df.index[i]
+
+            # 🔥 FIX: radar triggers at CLOSE of 15m candle
+            radar_close_time = candle_open_time + timedelta(minutes=15)
+
+            return {
+                "time": radar_close_time,
+                "close": float(c["Close"])
+            }
 
     return None
 
 # =========================
-# 5M TRADE
+# 5M TRADE (AFTER CONFIRMED RADAR CLOSE)
 # =========================
 
 def check_5m(df, radar_time):
@@ -169,7 +174,7 @@ def check_5m(df, radar_time):
     if df is None or df.empty:
         return None
 
-    df = df[df.index > radar_time]
+    df = df[df.index > radar_time]   # 🔥 IMPORTANT FIX
     if df.empty:
         return None
 
@@ -250,13 +255,13 @@ def scan_all(date=None):
 
 def format_result(r):
     msg = f"📊 {r['symbol']}\n"
-    msg += f"15M: {r['radar']['time']}\n"
+    msg += f"15M (CONFIRMED CLOSE): {r['radar']['time']}\n"
 
     if r.get("trade"):
         t = r["trade"]
         msg += f"5M: {t['time']}\nEntry: {t['entry']} SL: {t['sl']} TG: {t['target']}\n"
     else:
-        msg += "RADAR ONLY\n"
+        msg += "RADAR ONLY (WAITING)\n"
 
     return msg
 
@@ -276,11 +281,13 @@ def webhook():
     text = msg.get("text", "").strip().upper()
 
     # =========================
-    # LIVE
+    # LIVE (TODAY ONLY)
     # =========================
     if text == "LIVE":
-        send(chat_id, "📡 LIVE SCANNING (09:45–13:30 ONLY)")
-        results = scan_all()
+        send(chat_id, "📡 LIVE SCANNING (SESSION 09:45–13:30)")
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        results = scan_all(date=today)
 
         for r in results:
             send(chat_id, format_result(r))
@@ -292,7 +299,9 @@ def webhook():
     # =========================
     if text == "RADAR TODAY":
         send(chat_id, "📊 RADAR SCAN")
-        results = scan_all()
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        results = scan_all(date=today)
 
         for r in results:
             send(chat_id, f"{r['symbol']} → {r['radar']['time']}")
@@ -300,10 +309,10 @@ def webhook():
         return "ok"
 
     # =========================
-    # DATE SCAN
+    # DATE
     # =========================
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
-        send(chat_id, f"📅 SCANNING {text} (SESSION ONLY)")
+        send(chat_id, f"📅 SCANNING {text}")
         results = scan_all(date=text)
 
         for r in results:
@@ -316,6 +325,7 @@ def webhook():
     # =========================
     if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2}", text):
         sym, date = text.split()
+
         send(chat_id, f"📊 SCANNING {sym}")
 
         r = scan_stock(sym + ".NS", date)
@@ -336,14 +346,14 @@ def webhook():
 
 @app.route("/")
 def home():
-    return "BOT V6 SESSION ENGINE RUNNING"
+    return "BOT V7 CANDLE CLOSE ENGINE RUNNING"
 
 # =========================
 # START
 # =========================
 
 if __name__ == "__main__":
-    print("🚀 FINAL V6 ENGINE STARTED")
+    print("🚀 V7 CANDLE CLOSE ENGINE STARTED")
 
     set_webhook()
 
