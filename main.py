@@ -339,9 +339,10 @@ def webhook():
         return "ok"
 
     # =========================
-    # RANGE
-    # =========================
-    if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2} TO \d{4}-\d{2}-\d{2}", text):
+# RANGE SCAN FIXED BLOCK
+# =========================
+
+if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2} TO \d{4}-\d{2}-\d{2}", text):
 
     sym, d1, _, d2 = text.split()
     symbol = sym + ".NS"
@@ -352,15 +353,15 @@ def webhook():
     df5 = to_ist(get_data(symbol, "5m"))
 
     if df15 is None:
-        send(chat_id, "No data")
+        send(chat_id, "No data available")
         return "ok"
 
     d1 = pd.to_datetime(d1).date()
     d2 = pd.to_datetime(d2).date()
 
     found = False
-
     current = d1
+
     while current <= d2:
 
         date_str = current.strftime("%Y-%m-%d")
@@ -373,13 +374,13 @@ def webhook():
         if radar:
             trade = check_5m(temp5, radar["time"]) if temp5 is not None else None
 
-            r = {
+            result = {
                 "symbol": symbol,
                 "radar": radar,
                 "trade": trade
             }
 
-            send(chat_id, format_result(r))
+            send(chat_id, format_result(result))
             found = True
 
         current += pd.Timedelta(days=1)
