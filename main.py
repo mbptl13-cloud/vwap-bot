@@ -319,7 +319,7 @@ def find_5m_trade(df5, radar_time):
         # Moderate SL = VWAP
         sl = round(vwap - buffer, 2)
 
-        actual_risk = round(entry - sl, 2)
+        actual_risk = entry - sl
 
         if actual_risk <= 0:
             continue
