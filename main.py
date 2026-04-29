@@ -270,14 +270,21 @@ def find_5m_trade(df5, radar_time):
         if vwap_touch and bullish:
 
             entry = round(float(row["High"]), 2)
-            raw_sl = float(row["Low"])
-            sl = round(raw_sl * 0.995, 2)
-            risk = round(entry - sl, 2)
+            sl = round(float(row["VWAP"]), 2)
+            actual_risk = round(entry - sl, 2)
 
-            if risk <= 0:
+            if actual_risk <= 0:
                 continue
+            min_risk = round(entry * 0.003, 2)
 
-            target = round(entry + (2 * risk), 2)
+            if actual_risk < min_risk:
+                continue
+            max_risk = round(entry * 0.005, 2)
+
+            if actual_risk > max_risk:
+                continue
+                
+            target = round(entry + (actual_risk * 2), 2)    
 
             # =========================
             # RESULT CHECK (WIN / LOSS / OPEN)
