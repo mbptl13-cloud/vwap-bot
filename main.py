@@ -366,32 +366,43 @@ def run_range(symbol, d1, d2):
     start_date = pd.to_datetime(d1).date()
     end_date = pd.to_datetime(d2).date()
 
-    radar = find_15m_radars(df15)
+    results = []
 
-    if not radar:
+    # VERY IMPORTANT:
+    # find ALL radar candles from full df
+    radars = find_15m_radars(df15)
+
+    if not radars:
         return []
 
-    radar_time = radar["time"]
-    radar_date = radar_time.date()
+    for radar in radars:
+        radar_time = radar["time"]
+        radar_date = radar_time.date()
 
-    if not (start_date <= radar_date <= end_date):
-        return []
+        # date range filter
+        if not (start_date <= radar_date <= end_date):
+            continue
 
-    trade = None
+        trade = None
 
-    if df5 is not None:
-        temp5 = filter_date(df5, radar_time.strftime("%Y-%m-%d"))
+        if df5 is not None:
+            temp5 = filter_date(
+                df5,
+                radar_time.strftime("%Y-%m-%d")
+            )
 
-        if temp5 is not None:
-            trade = find_5m_trade(temp5, radar_time)
+            if temp5 is not None:
+                trade = find_5m_trade(temp5, radar_time)
 
-    return [{
-        "symbol": symbol,
-        "radar": {
-            "time": radar_time
-        },
-        "trade": trade
-    }]
+        results.append({
+            "symbol": symbol,
+            "radar": {
+                "time": radar_time
+            },
+            "trade": trade
+        })
+
+    return results
 
 
 # =====================================
