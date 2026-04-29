@@ -312,12 +312,12 @@ def find_5m_trade(df5, radar_time):
         vwap = float(row["VWAP"])
 
         # buffer pct is 0.02% of entry
-        buffer_pct = 0.002
+        buffer_pct = 0.0002
 
         buffer = entry * buffer_pct
 
         # Moderate SL = VWAP
-        sl = round(VWAP - buffer, 2)
+        sl = round(vwap - buffer, 2)
 
         actual_risk = round(entry - sl, 2)
 
