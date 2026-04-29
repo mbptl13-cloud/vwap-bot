@@ -357,8 +357,9 @@ def webhook():
         
         return "ok"
 
-    d1 = pd.to_datetime(d1).date()
-    d2 = pd.to_datetime(d2).date()
+    d1 = pd.to_datetime(d1).tz_localize("Asia/Kolkata")
+    d2 = pd.to_datetime(d2).tz_localize("Asia/Kolkata")
+
 
     found = False
     current = d1
