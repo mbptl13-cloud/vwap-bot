@@ -78,11 +78,24 @@ def to_ist(df):
 def session_filter(df):
     if df is None or df.empty:
         return None
-    try:
-        df = df.between_time("09:45", "13:30")
-    except:
-        return None
+
+    df = df.copy()
+
+    df.index = pd.to_datetime(df.index)
+
+    # force IST if missing
+    if df.index.tz is None:
+        df.index = df.index.tz_localize("Asia/Kolkata")
+
+    start = df.index.normalize() + pd.Timedelta(hours=9, minutes=45)
+    end = df.index.normalize() + pd.Timedelta(hours=13, minutes=30)
+
+    mask = (df.index.time >= pd.Timestamp("09:45").time()) & (df.index.time <= pd.Timestamp("13:30").time())
+
+    df = df[mask]
+
     return df if not df.empty else None
+
 
 # =========================
 # DATA
