@@ -324,15 +324,15 @@ def find_5m_trade(df5, radar_time):
         if actual_risk <= 0:
             continue
 
+        risk_pct = actual_risk / entry
+
         # Minimum SL = 0.3%
         min_risk = round(entry * 0.003, 2)
-        if actual_risk < min_risk:
-            continue
 
-        # Maximum SL = 0.5%
+        # Maximum SL = 1.2%
         max_risk = round(entry * 0.012, 2)
-        if actual_risk > max_risk:
-            continue
+        if not (min_risk <= risk_pct <= max_risk):
+            continue 
 
         # Target = 1:2 RR
         target = round(entry + (actual_risk * 2), 2)
