@@ -246,6 +246,8 @@ def find_5m_trade(df5, radar_time):
         return None
 
     df = df5.copy()
+
+    # only after 15m candle close
     df = df[df.index > radar_time]
 
     if df.empty:
@@ -266,6 +268,7 @@ def find_5m_trade(df5, radar_time):
         bullish = float(row["Close"]) > float(row["Open"])
 
         if vwap_touch and bullish:
+
             entry = round(float(row["High"]), 2)
             sl = round(float(row["Low"]), 2)
 
@@ -276,15 +279,40 @@ def find_5m_trade(df5, radar_time):
 
             target = round(entry + (2 * risk), 2)
 
+            # =========================
+            # RESULT CHECK (WIN / LOSS / OPEN)
+            # =========================
+
+            result = "OPEN"
+
+            future_df = df.iloc[i + 1:]
+
+            for _, next_row in future_df.iterrows():
+
+                hit_sl = float(next_row["Low"]) <= sl
+                hit_target = float(next_row["High"]) >= target
+
+                if hit_target and hit_sl:
+                    result = "OPEN"
+                    break
+
+                elif hit_target:
+                    result = "WIN"
+                    break
+
+                elif hit_sl:
+                    result = "LOSS"
+                    break
+
             return {
                 "time": df.index[i],
                 "entry": entry,
                 "sl": sl,
-                "target": target
+                "target": target,
+                "result": result
             }
 
     return None
-
 
 # =====================================
 # SINGLE SCAN
@@ -431,13 +459,15 @@ def format_result(r):
 
     if r["trade"]:
         t = r["trade"]
+
         msg += f"5M: {t['time']}\n"
-        msg += f"Entry: {t['entry']} SL: {t['sl']} TG: {t['target']}"
+        msg += f"Entry: {t['entry']} SL: {t['sl']} TG: {t['target']}\n"
+        msg += f"Result: {t['result']}"
+
     else:
         msg += "5M: NO SETUP"
 
     return msg
-
 
 # =====================================
 # WEBHOOK
