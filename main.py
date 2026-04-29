@@ -255,19 +255,32 @@ def find_5m_trade(df5, radar_time):
 
     df["VWAP"] = calculate_vwap(df)
 
-    for i in range(len(df)):
-        row = df.iloc[i]
+    for i in range(1, len(df)):
+    row = df.iloc[i]
+    prev = df.iloc[i - 1]
 
-        if pd.isna(row["VWAP"]):
-            continue
+    if pd.isna(row["VWAP"]):
+        continue
 
-        vwap_touch = (
-            float(row["Low"]) <= float(row["VWAP"]) <= float(row["High"])
-        )
+    # =====================================
+    # VWAP PULLBACK
+    # =====================================
 
-        bullish = float(row["Close"]) > float(row["Open"])
+    if not (
+        float(row["Low"]) <= float(row["VWAP"]) * 1.002
+        and float(row["Close"]) > float(row["VWAP"])
+    ):
+        continue
 
-        if vwap_touch and bullish:
+    # =====================================
+    # BREAKOUT CONFIRMATION
+    # =====================================
+
+    if not (
+        float(row["Close"]) > float(prev["High"])
+        and float(row["Close"]) > float(row["Open"])
+    ):
+        continue
 
             entry = round(float(row["High"]), 2)
             sl = round(float(row["VWAP"]), 2)
