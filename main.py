@@ -259,78 +259,87 @@ def find_5m_trade(df5, radar_time):
         row = df.iloc[i]
         prev = df.iloc[i - 1]
 
-    if pd.isna(row["VWAP"]):
-        continue
+        if pd.isna(row["VWAP"]):
+            continue
 
-    # =====================================
-    # VWAP PULLBACK
-    # =====================================
+        # =====================================
+        # VWAP PULLBACK
+        # =====================================
 
-    if not (
-        float(row["Low"]) <= float(row["VWAP"]) * 1.002
-        and float(row["Close"]) > float(row["VWAP"])
-    ):
-        continue
+        if not (
+            float(row["Low"]) <= float(row["VWAP"]) * 1.002
+            and float(row["Close"]) > float(row["VWAP"])
+        ):
+            continue
 
-    # =====================================
-    # BREAKOUT CONFIRMATION
-    # =====================================
+        # =====================================
+        # BREAKOUT CONFIRMATION
+        # =====================================
 
-    if not (
-        float(row["Close"]) > float(prev["High"])
-        and float(row["Close"]) > float(row["Open"])
-    ):
-        continue
+        if not (
+            float(row["Close"]) > float(prev["High"])
+            and float(row["Close"]) > float(row["Open"])
+        ):
+            continue
 
-            entry = round(float(row["High"]), 2)
-            sl = round(float(row["VWAP"]), 2)
-            actual_risk = round(entry - sl, 2)
+        # =====================================
+        # ENTRY / SL / TARGET
+        # =====================================
 
-            if actual_risk <= 0:
-                continue
-            min_risk = round(entry * 0.002, 2)
+        entry = round(float(row["High"]), 2)
+        sl = round(float(row["VWAP"]), 2)
 
-            if actual_risk < min_risk:
-                continue
-            max_risk = round(entry * 0.005, 2)
+        actual_risk = round(entry - sl, 2)
 
-            if actual_risk > max_risk:
-                continue
-                
-            target = round(entry + (actual_risk * 2), 2)    
+        if actual_risk <= 0:
+            continue
 
-            # =========================
-            # RESULT CHECK (WIN / LOSS / OPEN)
-            # =========================
+        # minimum SL = 0.2%
+        min_risk = round(entry * 0.002, 2)
 
-            result = "OPEN"
+        if actual_risk < min_risk:
+            continue
 
-            future_df = df.iloc[i:]
+        # maximum SL = 0.5%
+        max_risk = round(entry * 0.005, 2)
 
-            for _, next_row in future_df.iterrows():
+        if actual_risk > max_risk:
+            continue
 
-                hit_sl = float(next_row["Low"]) <= sl
-                hit_target = float(next_row["High"]) >= target
+        # RR = 1:2
+        target = round(entry + (actual_risk * 2), 2)
 
-                if hit_target and hit_sl:
-                    result = "OPEN"
-                    break
+        # =====================================
+        # RESULT CHECK
+        # =====================================
 
-                elif hit_target:
-                    result = "WIN"
-                    break
+        result = "OPEN"
 
-                elif hit_sl:
-                    result = "LOSS"
-                    break
+        future_df = df.iloc[i:]
 
-            return {
-                "time": df.index[i],
-                "entry": entry,
-                "sl": sl,
-                "target": target,
-                "result": result
-            }
+        for _, next_row in future_df.iterrows():
+            hit_sl = float(next_row["Low"]) <= sl
+            hit_target = float(next_row["High"]) >= target
+
+            if hit_target and hit_sl:
+                result = "LOSS"
+                break
+
+            elif hit_target:
+                result = "WIN"
+                break
+
+            elif hit_sl:
+                result = "LOSS"
+                break
+
+        return {
+            "time": df.index[i],
+            "entry": entry,
+            "sl": sl,
+            "target": target,
+            "result": result
+        }
 
     return None
 
