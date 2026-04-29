@@ -352,12 +352,7 @@ def find_5m_trade(df5, radar_time):
             elif hit_sl:
                 result = "LOSS"
                 break
-                 
-            if abs(candle_open - target) < abs(candle_open - sl):
-                result = "WIN"
-            else:
-                result = "LOSS"
-                
+        
         return {
             "time": df.index[i] + pd.Timedelta(minutes=5),
             "entry": entry,
