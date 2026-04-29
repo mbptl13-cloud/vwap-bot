@@ -88,16 +88,14 @@ def set_webhook():
 # DATA HELPERS
 # =====================================
 
-def get_data(symbol, interval="15m", period="5d"):
-    try:
-        df = yf.download(
-            tickers=symbol,
-            interval=interval,
-            period=period,
-            progress=False,
-            auto_adjust=False,
-            threads=False
-        )
+def get_data(symbol, interval):
+    df = yf.download(
+        symbol,
+        interval=interval,
+        period="30d",   # IMPORTANT FIX
+        progress=False
+    )
+
 
         if df is None or df.empty:
             return None
