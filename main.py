@@ -342,18 +342,19 @@ def webhook():
 # RANGE SCAN FIXED BLOCK
 # =========================
 
-if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2} TO \d{4}-\d{2}-\d{2}", text):
+    if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2} TO \d{4}-\d{2}-\d{2}", text):
 
-    sym, d1, _, d2 = text.split()
-    symbol = sym + ".NS"
+         sym, d1, _, d2 = text.split()
+         symbol = sym + ".NS"
 
-    send(chat_id, f"📊 RANGE SCANNING {sym}")
+         send(chat_id, f"📊 RANGE SCANNING {sym}")
 
     df15 = to_ist(get_data(symbol, "15m"))
     df5 = to_ist(get_data(symbol, "5m"))
 
     if df15 is None:
         send(chat_id, "No data available")
+        
         return "ok"
 
     d1 = pd.to_datetime(d1).date()
@@ -388,7 +389,7 @@ if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2} TO \d{4}-\d{2}-\d{2}", text):
     if not found:
         send(chat_id, "No setups in range")
 
-    return "ok"
+        return "ok"
 
 
 # =========================
