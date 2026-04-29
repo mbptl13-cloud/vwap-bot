@@ -89,13 +89,13 @@ def set_webhook():
 # =====================================
 
 def get_data(symbol, interval):
-    df = yf.download(
-        symbol,
-        interval=interval,
-        period="30d",   # IMPORTANT FIX
-        progress=False
-    )
-
+    try:
+        df = yf.download(
+            symbol,
+            interval=interval,
+            period="30d",   # IMPORTANT FIX
+            progress=False
+        )
 
         if df is None or df.empty:
             return None
