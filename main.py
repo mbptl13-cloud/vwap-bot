@@ -1,25 +1,46 @@
 import os
 import re
+import time
 import requests
 import pandas as pd
 import yfinance as yf
-from flask import Flask, request
-from datetime import datetime, timedelta
 
-# =========================
+from flask import Flask, request
+from datetime import datetime
+
+# =====================================
 # CONFIG
-# =========================
+# =====================================
 
 BOT_TOKEN = "8689896067:AAEuHnXG8f7orhfygCKvHoDItQmJTqzGGB4"
 RENDER_URL = "https://vwap-bot-ia6r.onrender.com"
+
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 PORT = int(os.environ.get("PORT", 10000))
 
 app = Flask(__name__)
 
-# =========================
-# STOCKS
-# =========================
+# =====================================
+# ANTI DUPLICATE SYSTEM
+# =====================================
+
+LAST_REQUEST = {}
+
+def is_duplicate(chat_id, text):
+    key = f"{chat_id}:{text}"
+    now = time.time()
+
+    if key in LAST_REQUEST:
+        if now - LAST_REQUEST[key] < 5:
+            return True
+
+    LAST_REQUEST[key] = now
+    return False
+
+
+# =====================================
+# STOCK LIST
+# =====================================
 
 FNO_STOCKS = [
     "ADANIGREEN.NS",
@@ -28,32 +49,80 @@ FNO_STOCKS = [
     "TCS.NS"
 ]
 
-# =========================
+
+# =====================================
 # TELEGRAM SEND
-# =========================
+# =====================================
 
 def send(chat_id, text):
     try:
         requests.post(
             f"{BASE_URL}/sendMessage",
-            json={"chat_id": chat_id, "text": text}
+            json={
+                "chat_id": chat_id,
+                "text": text
+            },
+            timeout=20
         )
-    except:
-        pass
+    except Exception as e:
+        print("Send Error:", e)
 
-# =========================
-# WEBHOOK SET
-# =========================
+
+# =====================================
+# WEBHOOK
+# =====================================
 
 def set_webhook():
     try:
-        requests.get(f"{BASE_URL}/setWebhook?url={RENDER_URL}/webhook")
-    except:
-        pass
+        url = f"{RENDER_URL}/webhook"
+        requests.get(
+            f"{BASE_URL}/setWebhook?url={url}",
+            timeout=20
+        )
+        print("Webhook set:", url)
+    except Exception as e:
+        print("Webhook Error:", e)
 
-# =========================
-# TIMEZONE (SAFE)
-# =========================
+
+# =====================================
+# DATA HELPERS
+# =====================================
+
+def get_data(symbol, interval="15m", period="5d"):
+    try:
+        df = yf.download(
+            tickers=symbol,
+            interval=interval,
+            period=period,
+            progress=False,
+            auto_adjust=False,
+            threads=False
+        )
+
+        if df is None or df.empty:
+            return None
+
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = [col[0] for col in df.columns]
+
+        needed = ["Open", "High", "Low", "Close", "Volume"]
+
+        for col in needed:
+            if col not in df.columns:
+                return None
+
+        df = df[needed].copy()
+        df.dropna(inplace=True)
+
+        if df.empty:
+            return None
+
+        return df
+
+    except Exception as e:
+        print("Download Error:", symbol, e)
+        return None
+
 
 def to_ist(df):
     if df is None or df.empty:
@@ -65,15 +134,14 @@ def to_ist(df):
     try:
         if df.index.tz is None:
             df.index = df.index.tz_localize("UTC")
+
         df.index = df.index.tz_convert("Asia/Kolkata")
-    except:
+
+    except Exception:
         pass
 
     return df
 
-# =========================
-# SESSION FILTER
-# =========================
 
 def session_filter(df):
     if df is None or df.empty:
@@ -81,173 +149,174 @@ def session_filter(df):
 
     df = df.copy()
 
-    df.index = pd.to_datetime(df.index)
+    try:
+        df = df.between_time("09:45", "13:30")
+    except Exception:
+        return None
 
-    # force IST if missing
-    if df.index.tz is None:
-        df.index = df.index.tz_localize("Asia/Kolkata")
+    if df.empty:
+        return None
 
-    start = df.index.normalize() + pd.Timedelta(hours=9, minutes=45)
-    end = df.index.normalize() + pd.Timedelta(hours=13, minutes=30)
-
-    mask = (df.index.time >= pd.Timestamp("09:45").time()) & (df.index.time <= pd.Timestamp("13:30").time())
-
-    df = df[mask]
-
-    return df if not df.empty else None
+    return df
 
 
-# =========================
-# DATA
-# =========================
-
-def get_data(symbol, interval):
-    df = yf.download(symbol, interval=interval, period="5d", progress=False)
-
+def filter_date(df, date_str):
     if df is None or df.empty:
         return None
 
-    df.columns = [c[0] if isinstance(c, tuple) else c for c in df.columns]
-    return df.dropna()
+    target = pd.to_datetime(date_str).date()
 
-def vwap(df):
+    df = df.copy()
+    df["only_date"] = df.index.date
+    df = df[df["only_date"] == target]
+    df.drop(columns=["only_date"], inplace=True)
+
+    if df.empty:
+        return None
+
+    return df
+
+
+def calculate_vwap(df):
+    if df is None or df.empty:
+        return None
+
     tp = (df["High"] + df["Low"] + df["Close"]) / 3
-    return (tp * df["Volume"]).cumsum() / df["Volume"].cumsum()
+    vol_sum = df["Volume"].cumsum()
 
-# =========================
-# DATE FILTER
-# =========================
+    if (vol_sum == 0).any():
+        return None
 
-def filter_date(df, date):
-    if df is None or df.empty:
+    return (tp * df["Volume"]).cumsum() / vol_sum
+
+
+# =====================================
+# 15M RADAR LOGIC
+# =====================================
+
+def find_15m_radar(df):
+    if df is None or len(df) < 20:
         return None
 
     df = df.copy()
-    df["date"] = df.index.date
-    target = pd.to_datetime(date).date()
 
-    df = df[df["date"] == target]
-    return df.drop(columns=["date"])
-
-# =========================
-# 15M RADAR (CANDLE CLOSE FIX)
-# =========================
-
-def find_15m_radars(df):
-    radars = []
-
-    df = df.copy()
     df["VWAP"] = calculate_vwap(df)
     df["VOL_SMA20"] = df["Volume"].rolling(20).mean()
 
-    for i in range(20, len(df)):
-
+    for i in range(19, len(df)):
         row = df.iloc[i]
 
         if pd.isna(row["VWAP"]) or pd.isna(row["VOL_SMA20"]):
             continue
 
-        open_price = row["Open"]
+        open_price = float(row["Open"])
 
         if open_price <= 0:
             continue
 
+        body_pct = abs(row["Close"] - row["Open"]) / open_price
+        range_pct = (row["High"] - row["Low"]) / open_price
+
         cond = (
             row["Close"] > row["VWAP"] and
             row["Volume"] > 500000 and
-            row["Volume"] > 2 * row["VOL_SMA20"] and
-            abs(row["Close"] - row["Open"]) / open_price > 0.006 and
-            (row["High"] - row["Low"]) / open_price > 0.006 and
+            row["Volume"] > (2 * row["VOL_SMA20"]) and
+            body_pct > 0.006 and
+            range_pct > 0.006 and
             row["Close"] > row["Open"]
         )
 
         if cond:
-
-            # 🔥 IMPORTANT: NEXT 15M CANDLE CLOSE TIME
+            # VERY IMPORTANT:
+            # 11:15 candle closes at 11:30
             radar_time = df.index[i] + pd.Timedelta(minutes=15)
 
-            radars.append(radar_time)
+            return {
+                "time": radar_time,
+                "close": round(float(row["Close"]), 2)
+            }
 
-    return radars
+    return None
 
-# =========================
-# 5M TRADE
-# =========================
+
+# =====================================
+# 5M ENTRY LOGIC
+# =====================================
 
 def find_5m_trade(df5, radar_time):
+    if df5 is None or df5.empty:
+        return None
 
-    df = df5[df5.index > radar_time].copy()
+    df = df5.copy()
+
+    # only after 15m candle close
+    df = df[df.index > radar_time]
 
     if df.empty:
         return None
 
-    for i in range(len(df)):
+    df["VWAP"] = calculate_vwap(df)
 
+    for i in range(len(df)):
         row = df.iloc[i]
 
-        vwap_touch = row["Low"] <= row["VWAP"] <= row["High"]
-        bullish = row["Close"] > row["Open"]
+        if pd.isna(row["VWAP"]):
+            continue
+
+        vwap_touch = (
+            float(row["Low"]) <= float(row["VWAP"]) <= float(row["High"])
+        )
+
+        bullish = float(row["Close"]) > float(row["Open"])
 
         if vwap_touch and bullish:
+            entry = round(float(row["High"]), 2)
+            sl = round(float(row["Low"]), 2)
 
-            entry = row["High"]
-            sl = row["Low"]
-            risk = entry - sl
+            risk = round(entry - sl, 2)
 
             if risk <= 0:
                 continue
 
+            target = round(entry + (2 * risk), 2)
+
             return {
                 "time": df.index[i],
-                "entry": round(entry, 2),
-                "sl": round(sl, 2),
-                "target": round(entry + 2 * risk, 2)
+                "entry": entry,
+                "sl": sl,
+                "target": target
             }
 
     return None
-    
-def run_range(symbol, df15, df5, d1, d2):
 
-    radars = find_15m_radars(df15)
 
-    results = []
+# =====================================
+# SINGLE STOCK SCAN
+# =====================================
 
-    for r in radars:
-
-        if not (d1 <= r.date() <= d2):
-            continue
-
-        trade = find_5m_trade(df5, r)
-
-        results.append({
-            "symbol": symbol,
-            "radar": {"time": r},
-            "trade": trade   # can be None
-        })
-
-    return results
-
-# =========================
-# SCAN STOCK
-# =========================
-
-def scan_stock(symbol, date=None):
-
+def scan_stock(symbol, scan_date=None):
     df15 = to_ist(get_data(symbol, "15m"))
     df5 = to_ist(get_data(symbol, "5m"))
+
+    df15 = session_filter(df15)
+    df5 = session_filter(df5)
 
     if df15 is None:
         return None
 
-    if date:
-        df15 = filter_date(df15, date)
-        df5 = filter_date(df5, date)
+    if scan_date:
+        df15 = filter_date(df15, scan_date)
+        df5 = filter_date(df5, scan_date)
 
-    radar = check_15m(df15)
+    if df15 is None:
+        return None
+
+    radar = find_15m_radar(df15)
+
     if not radar:
         return None
 
-    trade = check_5m(df5, radar["time"]) if df5 is not None else None
+    trade = find_5m_trade(df5, radar["time"]) if df5 is not None else None
 
     return {
         "symbol": symbol,
@@ -255,41 +324,86 @@ def scan_stock(symbol, date=None):
         "trade": trade
     }
 
-# =========================
-# SCAN ALL
-# =========================
 
-def scan_all(date=None):
+# =====================================
+# ALL STOCK SCAN
+# =====================================
+
+def scan_all(scan_date=None):
     results = []
 
-    for s in FNO_STOCKS:
-        r = scan_stock(s, date)
-        if r:
-            results.append(r)
+    for stock in FNO_STOCKS:
+        result = scan_stock(stock, scan_date)
+
+        if result:
+            results.append(result)
 
     return results
 
-# =========================
+
+# =====================================
+# RANGE SCAN
+# =====================================
+
+def run_range(symbol, start_date, end_date):
+    df15 = to_ist(get_data(symbol, "15m"))
+    df5 = to_ist(get_data(symbol, "5m"))
+
+    df15 = session_filter(df15)
+    df5 = session_filter(df5)
+
+    if df15 is None:
+        return []
+
+    results = []
+
+    current = pd.to_datetime(start_date)
+    end = pd.to_datetime(end_date)
+
+    while current <= end:
+        date_str = current.strftime("%Y-%m-%d")
+
+        temp15 = filter_date(df15, date_str)
+        temp5 = filter_date(df5, date_str)
+
+        if temp15 is not None:
+            radar = find_15m_radar(temp15)
+
+            if radar:
+                trade = find_5m_trade(temp5, radar["time"]) if temp5 is not None else None
+
+                results.append({
+                    "symbol": symbol,
+                    "radar": radar,
+                    "trade": trade
+                })
+
+        current += pd.Timedelta(days=1)
+
+    return results
+
+
+# =====================================
 # FORMAT
-# =========================
+# =====================================
 
 def format_result(r):
-
     msg = f"📊 {r['symbol']}\n"
     msg += f"15M: {r['radar']['time']}\n"
 
     if r["trade"]:
         t = r["trade"]
         msg += f"5M: {t['time']}\n"
-        msg += f"Entry: {t['entry']} SL: {t['sl']} TG: {t['target']}\n"
+        msg += f"Entry: {t['entry']} SL: {t['sl']} TG: {t['target']}"
     else:
-        msg += "5M: NO SETUP\n"
+        msg += "5M: NO SETUP"
 
     return msg
 
-# =========================
-# COMMAND PARSER (ALL FIXED)
-# =========================
+
+# =====================================
+# WEBHOOK COMMAND ENGINE
+# =====================================
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -302,153 +416,176 @@ def webhook():
     chat_id = msg["chat"]["id"]
     text = msg.get("text", "").strip().upper()
 
+    # ANTI DUPLICATE
+    if is_duplicate(chat_id, text):
+        print("Duplicate ignored:", text)
+        return "ok"
+
     today = datetime.now().strftime("%Y-%m-%d")
 
-    # =========================
+    # ---------------------------------
     # LIVE
-    # =========================
+    # ---------------------------------
+
     if text == "LIVE":
-        send(chat_id, "📡 LIVE SCANNING")
-        results = scan_all(date=today)
+        send(chat_id, "📡 LIVE SCANNING (09:45–13:30 ONLY)")
+
+        results = scan_all(today)
+
+        if not results:
+            send(chat_id, "No live setups found")
+            return "ok"
 
         for r in results:
             send(chat_id, format_result(r))
 
         return "ok"
 
-    # =========================
+    # ---------------------------------
     # RADAR TODAY
-    # =========================
+    # ---------------------------------
+
     if text == "RADAR TODAY":
         send(chat_id, "📊 RADAR TODAY")
-        results = scan_all(date=today)
+
+        results = scan_all(today)
+
+        if not results:
+            send(chat_id, "No radar found today")
+            return "ok"
 
         for r in results:
             send(chat_id, f"{r['symbol']} → {r['radar']['time']}")
 
         return "ok"
 
-    # =========================
+    # ---------------------------------
     # DATE RADAR
-    # =========================
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2} RADAR", text):
-        date = text.replace(" RADAR", "")
-        send(chat_id, f"📊 RADAR {date}")
+    # Example: 2026-04-27 RADAR
+    # ---------------------------------
 
-        results = scan_all(date=date)
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2} RADAR", text):
+        scan_date = text.replace(" RADAR", "")
+
+        send(chat_id, f"📊 RADAR {scan_date}")
+
+        results = scan_all(scan_date)
+
+        if not results:
+            send(chat_id, "No radar setups found")
+            return "ok"
 
         for r in results:
             send(chat_id, f"{r['symbol']} → {r['radar']['time']}")
 
         return "ok"
 
-    # =========================
+    # ---------------------------------
     # DATE ONLY
-    # =========================
+    # Example: 2026-04-27
+    # ---------------------------------
+
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
         send(chat_id, f"📅 SCANNING {text}")
-        results = scan_all(date=text)
+
+        results = scan_all(text)
+
+        if not results:
+            send(chat_id, "No setups found")
+            return "ok"
 
         for r in results:
             send(chat_id, format_result(r))
 
         return "ok"
 
-    # =========================
-    # STOCK DATE
-    # =========================
-    if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2}", text):
-        sym, date = text.split()
-
-        send(chat_id, f"📊 SCANNING {sym}")
-
-        r = scan_stock(sym + ".NS", date)
-
-        if r:
-            send(chat_id, format_result(r))
-        else:
-            send(chat_id, "No setup")
-
-        return "ok"
-
-    # =========================
-# RANGE SCAN FIXED BLOCK
-# =========================
+    # ---------------------------------
+    # RANGE
+    # Example:
+    # BHEL 2026-04-21 TO 2026-04-28
+    # ---------------------------------
 
     if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2} TO \d{4}-\d{2}-\d{2}", text):
+        sym, d1, _, d2 = text.split()
 
-         sym, d1, _, d2 = text.split()
-         symbol = sym + ".NS"
+        symbol = sym + ".NS"
 
-         send(chat_id, f"📊 RANGE SCANNING {sym}")
+        send(chat_id, f"📊 RANGE SCANNING {sym}")
 
-    df15 = to_ist(get_data(symbol, "15m"))
-    df5 = to_ist(get_data(symbol, "5m"))
+        results = run_range(symbol, d1, d2)
 
-    if df15 is None:
-        send(chat_id, "No data available")
-        
+        if not results:
+            send(chat_id, "No setups in range")
+            return "ok"
+
+        for r in results:
+            send(chat_id, format_result(r))
+
         return "ok"
 
-    d1 = pd.to_datetime(d1).tz_localize("Asia/Kolkata")
-    d2 = pd.to_datetime(d2).tz_localize("Asia/Kolkata")
+    # ---------------------------------
+    # STOCK + DATE
+    # Example:
+    # BHEL 2026-04-27
+    # ---------------------------------
 
+    if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2}", text):
+        sym, scan_date = text.split()
 
-    found = False
-    current = d1
+        symbol = sym + ".NS"
 
-    while current <= d2:
+        send(chat_id, f"📊 SCANNING {symbol}")
 
-        date_str = current.strftime("%Y-%m-%d")
+        result = scan_stock(symbol, scan_date)
 
-        temp15 = filter_date(df15, date_str)
-        temp5 = filter_date(df5, date_str)
-
-        radar = check_15m(temp15)
-
-        if radar:
-            trade = check_5m(temp5, radar["time"]) if temp5 is not None else None
-
-            result = {
-                "symbol": symbol,
-                "radar": radar,
-                "trade": trade
-            }
-
+        if result:
             send(chat_id, format_result(result))
-            found = True
-
-        current += pd.Timedelta(days=1)
-
-    if not found:
-        send(chat_id, "No setups in range")
+        else:
+            send(chat_id, "No setup found")
 
         return "ok"
 
+    # ---------------------------------
+    # START
+    # ---------------------------------
 
-# =========================
+    if text == "/START":
+        send(
+            chat_id,
+            "🤖 HYBRID FNO BOT READY\n\n"
+            "Commands:\n\n"
+            "LIVE\n"
+            "RADAR TODAY\n"
+            "2026-04-06\n"
+            "BHEL 2026-04-06\n"
+            "BHEL 2026-04-06 TO 2026-04-10\n"
+            "2026-04-06 RADAR"
+        )
+        return "ok"
+
+    send(chat_id, "Unknown command")
+    return "ok"
+
+
+# =====================================
 # HOME
-# =========================
+# =====================================
 
 @app.route("/")
 def home():
-    return "V8 FULL COMMAND ENGINE RUNNING"
+    return "BOT RUNNING SAFE MODE"
 
-# =========================
+
+# =====================================
 # START
-# =========================
+# =====================================
 
 if __name__ == "__main__":
     print("🚀 BOT STARTING SAFE MODE")
 
-    try:
-        set_webhook()
-        print("Webhook OK")
-    except Exception as e:
-        print("Webhook failed:", e)
+    set_webhook()
 
-    try:
-        app.run(host="0.0.0.0", port=PORT)
-    except Exception as e:
-        print("Flask crashed:", e)
-
+    app.run(
+        host="0.0.0.0",
+        port=PORT
+    )
