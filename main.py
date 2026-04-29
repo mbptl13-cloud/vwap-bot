@@ -336,7 +336,7 @@ def find_5m_trade(df5, radar_time):
 
         result = "OPEN"
 
-        future_df = df.iloc[i:]
+        future_df = df.iloc[i + 1:]
 
         for _, next_row in future_df.iterrows():
             candle_low = float(next_row["Low"])
