@@ -309,8 +309,15 @@ def find_5m_trade(df5, radar_time):
         # Entry = breakout candle high
         entry = round(float(row["High"]), 2)
 
+        vwap = float(row["VWAP"])
+
+        # buffer pct is 0.02% of entry
+        buffer_pct = 0.002
+
+        buffer = entry * buffer_pct
+
         # Moderate SL = VWAP
-        sl = round(float(row["VWAP"]), 2)
+        sl = round(VWAP - buffer, 2)
 
         actual_risk = round(entry - sl, 2)
 
