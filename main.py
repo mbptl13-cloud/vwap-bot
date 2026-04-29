@@ -294,35 +294,52 @@ def find_5m_trade(df5, radar_time):
 # SINGLE STOCK SCAN
 # =====================================
 
-def scan_stock(symbol, scan_date=None):
+def scan_stock(symbol, date=None):
+
     df15 = to_ist(get_data(symbol, "15m"))
     df5 = to_ist(get_data(symbol, "5m"))
 
+    if df15 is None:
+        return None
+
+    # Apply session filter first
     df15 = session_filter(df15)
     df5 = session_filter(df5)
 
     if df15 is None:
         return None
 
-    if scan_date:
-        df15 = filter_date(df15, scan_date)
-        df5 = filter_date(df5, scan_date)
+    # Apply date filter if user gives date
+    if date:
+        df15 = filter_date(df15, date)
+        df5 = filter_date(df5, date)
 
-    if df15 is None:
+        if df15 is None:
+            return None
+
+    # NEW radar logic
+    radars = find_15m_radars(df15)
+
+    if not radars:
         return None
 
-    radar = find_15m_radar(df15)
+    # First valid radar
+    radar_time = radars[0]
 
-    if not radar:
-        return None
+    # 5M check only after 15M candle closes
+    trade = None
 
-    trade = find_5m_trade(df5, radar["time"]) if df5 is not None else None
+    if df5 is not None:
+        trade = find_5m_trade(df5, radar_time)
 
     return {
         "symbol": symbol,
-        "radar": radar,
+        "radar": {
+            "time": radar_time
+        },
         "trade": trade
     }
+
 
 
 # =====================================
