@@ -256,8 +256,8 @@ def find_5m_trade(df5, radar_time):
     df["VWAP"] = calculate_vwap(df)
 
     for i in range(1, len(df)):
-    row = df.iloc[i]
-    prev = df.iloc[i - 1]
+        row = df.iloc[i]
+        prev = df.iloc[i - 1]
 
     if pd.isna(row["VWAP"]):
         continue
