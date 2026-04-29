@@ -275,7 +275,7 @@ def find_5m_trade(df5, radar_time):
 
             if actual_risk <= 0:
                 continue
-            min_risk = round(entry * 0.003, 2)
+            min_risk = round(entry * 0.002, 2)
 
             if actual_risk < min_risk:
                 continue
