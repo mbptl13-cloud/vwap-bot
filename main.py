@@ -254,7 +254,7 @@ def find_5m_trade(df5, radar_time):
         return None
 
     # Calculate VWAP
-    df["VWAP"] = calculate_vwap(df)
+    df5["VWAP"] = calculate_vwap_5m(df5)
 
     for i in range(1, len(df)):
         row = df.iloc[i]
