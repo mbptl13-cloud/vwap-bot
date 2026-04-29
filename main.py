@@ -327,10 +327,10 @@ def find_5m_trade(df5, radar_time):
         risk_pct = actual_risk / entry
 
         # Minimum SL = 0.3%
-        min_risk = round(entry * 0.003, 2)
+        min_risk = 0.003
 
         # Maximum SL = 1.2%
-        max_risk = round(entry * 0.012, 2)
+        max_risk = 0.012
         if not (min_risk <= risk_pct <= max_risk):
             continue 
 
