@@ -271,7 +271,7 @@ def find_5m_trade(df5, radar_time):
 
             entry = round(float(row["High"]), 2)
             raw_sl = float(row["Low"])
-            sl = round(raw_sl * 0.996, 2)
+            sl = round(raw_sl * 0.995, 2)
             risk = round(entry - sl, 2)
 
             if risk <= 0:
