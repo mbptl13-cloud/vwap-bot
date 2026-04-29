@@ -342,24 +342,53 @@ def webhook():
     # RANGE
     # =========================
     if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2} TO \d{4}-\d{2}-\d{2}", text):
-        sym, d1, _, d2 = text.split()
 
-        send(chat_id, f"📊 RANGE SCAN {sym}")
+    sym, d1, _, d2 = text.split()
+    symbol = sym + ".NS"
 
-        d1 = pd.to_datetime(d1)
-        d2 = pd.to_datetime(d2)
+    send(chat_id, f"📊 RANGE SCANNING {sym}")
 
-        for i in range((d2 - d1).days + 1):
-            d = (d1 + pd.Timedelta(days=i)).strftime("%Y-%m-%d")
-            r = scan_stock(sym + ".NS", d)
+    df15 = to_ist(get_data(symbol, "15m"))
+    df5 = to_ist(get_data(symbol, "5m"))
 
-            if r:
-                send(chat_id, format_result(r))
-
+    if df15 is None:
+        send(chat_id, "No data")
         return "ok"
 
-    send(chat_id, "Unknown command")
+    d1 = pd.to_datetime(d1).date()
+    d2 = pd.to_datetime(d2).date()
+
+    found = False
+
+    current = d1
+    while current <= d2:
+
+        date_str = current.strftime("%Y-%m-%d")
+
+        temp15 = filter_date(df15, date_str)
+        temp5 = filter_date(df5, date_str)
+
+        radar = check_15m(temp15)
+
+        if radar:
+            trade = check_5m(temp5, radar["time"]) if temp5 is not None else None
+
+            r = {
+                "symbol": symbol,
+                "radar": radar,
+                "trade": trade
+            }
+
+            send(chat_id, format_result(r))
+            found = True
+
+        current += pd.Timedelta(days=1)
+
+    if not found:
+        send(chat_id, "No setups in range")
+
     return "ok"
+
 
 # =========================
 # HOME
