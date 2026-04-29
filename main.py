@@ -195,11 +195,13 @@ def calculate_vwap(df):
 
 def find_15m_radars(df):
     if df is None or len(df) < 20:
-        return None
+        return []
 
     df = df.copy()
     df["VWAP"] = calculate_vwap(df)
     df["VOL_SMA20"] = df["Volume"].rolling(20).mean()
+
+    radars = []
 
     for i in range(19, len(df)):
         row = df.iloc[i]
@@ -227,12 +229,12 @@ def find_15m_radars(df):
         if cond:
             radar_time = df.index[i] + pd.Timedelta(minutes=15)
 
-            return {
+            radars.append({
                 "time": radar_time,
                 "close": round(float(row["Close"]), 2)
-            }
+            })
 
-    return None
+    return radars
 
 
 # =====================================
@@ -301,12 +303,27 @@ def scan_stock(symbol, date=None):
     if df15 is None:
         return None
 
-    radar = find_15m_radars(df15)
+    radars = find_15m_radars(df15)
 
-    if not radar:
-        return None
+if not radars:
+    return None
 
+selected_radar = None
+
+for radar in radars:
     radar_time = radar["time"]
+
+    if date:
+        if radar_time.date() != pd.to_datetime(date).date():
+            continue
+
+    selected_radar = radar
+    break
+
+if not selected_radar:
+    return None
+
+radar_time = selected_radar["time"]
 
     if date:
         if radar_time.date() != pd.to_datetime(date).date():
