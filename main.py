@@ -404,8 +404,16 @@ def home():
 # =========================
 
 if __name__ == "__main__":
-    print("🚀 V8 ENGINE STARTED")
+    print("🚀 BOT STARTING SAFE MODE")
 
-    set_webhook()
+    try:
+        set_webhook()
+        print("Webhook OK")
+    except Exception as e:
+        print("Webhook failed:", e)
 
-    app.run(host="0.0.0.0", port=PORT)
+    try:
+        app.run(host="0.0.0.0", port=PORT)
+    except Exception as e:
+        print("Flask crashed:", e)
+
