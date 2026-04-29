@@ -358,70 +358,69 @@ def scan_all(scan_date=None):
     return results
 
 
-# =========================
-# RANGE SCAN FIXED
-# =========================
+    # =========================
+    # RANGE SCAN FIXED
+    # =========================
 
-if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2} TO \d{4}-\d{2}-\d{2}", text):
+    if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2} TO \d{4}-\d{2}-\d{2}", text):
 
-    sym, d1, _, d2 = text.split()
-    symbol = sym + ".NS"
+        sym, d1, _, d2 = text.split()
+        symbol = sym + ".NS"
 
-    send(chat_id, f"📊 RANGE SCANNING {sym}")
+        send(chat_id, f"📊 RANGE SCANNING {sym}")
 
-    df15 = to_ist(get_data(symbol, "15m"))
-    df5 = to_ist(get_data(symbol, "5m"))
+        df15 = to_ist(get_data(symbol, "15m"))
+        df5 = to_ist(get_data(symbol, "5m"))
 
-    if df15 is None:
-        send(chat_id, "No data available")
+        if df15 is None:
+            send(chat_id, "No data available")
+            return "ok"
+
+        df15 = session_filter(df15)
+        df5 = session_filter(df5)
+
+        start_date = pd.to_datetime(d1).date()
+        end_date = pd.to_datetime(d2).date()
+
+        found = False
+        current = start_date
+
+        while current <= end_date:
+
+            date_str = current.strftime("%Y-%m-%d")
+
+            temp15 = filter_date(df15, date_str)
+            temp5 = filter_date(df5, date_str)
+
+            if temp15 is not None:
+
+                radars = find_15m_radars(temp15)
+
+                if radars:
+
+                    radar_time = radars[0]
+
+                    trade = None
+                    if temp5 is not None:
+                        trade = find_5m_trade(temp5, radar_time)
+
+                    result = {
+                        "symbol": symbol,
+                        "radar": {
+                            "time": radar_time
+                        },
+                        "trade": trade
+                    }
+
+                    send(chat_id, format_result(result))
+                    found = True
+
+            current += timedelta(days=1)
+
+        if not found:
+            send(chat_id, "No setups in range")
+
         return "ok"
-
-    df15 = session_filter(df15)
-    df5 = session_filter(df5)
-
-    start_date = pd.to_datetime(d1).date()
-    end_date = pd.to_datetime(d2).date()
-
-    found = False
-    current = start_date
-
-    while current <= end_date:
-
-        date_str = current.strftime("%Y-%m-%d")
-
-        temp15 = filter_date(df15, date_str)
-        temp5 = filter_date(df5, date_str)
-
-        if temp15 is not None:
-
-            # NEW 15M LOGIC
-            radars = find_15m_radars(temp15)
-
-            if radars:
-
-                radar_time = radars[0]
-
-                trade = None
-                if temp5 is not None:
-                    trade = find_5m_trade(temp5, radar_time)
-
-                result = {
-                    "symbol": symbol,
-                    "radar": {
-                        "time": radar_time
-                    },
-                    "trade": trade
-                }
-
-                send(chat_id, format_result(result))
-                found = True
-
-        current += timedelta(days=1)
-
-    if not found:
-        send(chat_id, "No setups in range")
-
-    return "ok"
 
 
 # =====================================
