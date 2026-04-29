@@ -325,8 +325,8 @@ def find_5m_trade(df5, radar_time):
         min_risk = 0.003
 
         # Maximum SL = 1.2%
-        
-        if not (min_risk <= risk_pct):
+        max_risk = 0.015
+        if not (min_risk <= risk_pct <= max_risk):
             continue 
 
         # Target = 1:2 RR
@@ -513,6 +513,7 @@ def format_result(r):
         t = r["trade"]
 
         msg += f"5M: {t['time']}\n"
+        msg += f"Score: {t['score']}\n"
         msg += f"Entry: {t['entry']} SL: {t['sl']} TG: {t['target']}\n"
         msg += f"Result: {t['result']}"
 
