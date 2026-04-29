@@ -358,8 +358,8 @@ def scan_all(scan_date=None):
     return results
 
 
-    # =========================
-    # RANGE SCAN FIXED
+        # =========================
+    # RANGE SCAN SAFE VERSION
     # =========================
 
     if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2} TO \d{4}-\d{2}-\d{2}", text):
@@ -379,43 +379,46 @@ def scan_all(scan_date=None):
         df15 = session_filter(df15)
         df5 = session_filter(df5)
 
+        if df15 is None:
+            send(chat_id, "No valid 15M data")
+            return "ok"
+
         start_date = pd.to_datetime(d1).date()
         end_date = pd.to_datetime(d2).date()
 
         found = False
-        current = start_date
 
-        while current <= end_date:
+        for single_date in pd.date_range(start=start_date, end=end_date):
 
-            date_str = current.strftime("%Y-%m-%d")
+            date_str = single_date.strftime("%Y-%m-%d")
 
             temp15 = filter_date(df15, date_str)
             temp5 = filter_date(df5, date_str)
 
-            if temp15 is not None:
+            if temp15 is None or temp15.empty:
+                continue
 
-                radars = find_15m_radars(temp15)
+            radars = find_15m_radars(temp15)
 
-                if radars:
+            if not radars:
+                continue
 
-                    radar_time = radars[0]
+            radar_time = radars[0]
 
-                    trade = None
-                    if temp5 is not None:
-                        trade = find_5m_trade(temp5, radar_time)
+            trade = None
+            if temp5 is not None and not temp5.empty:
+                trade = find_5m_trade(temp5, radar_time)
 
-                    result = {
-                        "symbol": symbol,
-                        "radar": {
-                            "time": radar_time
-                        },
-                        "trade": trade
-                    }
+            result = {
+                "symbol": symbol,
+                "radar": {
+                    "time": radar_time
+                },
+                "trade": trade
+            }
 
-                    send(chat_id, format_result(result))
-                    found = True
-
-            current += timedelta(days=1)
+            send(chat_id, format_result(result))
+            found = True
 
         if not found:
             send(chat_id, "No setups in range")
