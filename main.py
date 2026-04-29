@@ -330,7 +330,7 @@ def find_5m_trade(df5, radar_time):
             continue
 
         # Maximum SL = 0.5%
-        max_risk = round(entry * 0.010, 2)
+        max_risk = round(entry * 0.012, 2)
         if actual_risk > max_risk:
             continue
 
