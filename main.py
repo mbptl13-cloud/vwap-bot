@@ -133,81 +133,99 @@ def filter_date(df, date):
 # 15M RADAR (CANDLE CLOSE FIX)
 # =========================
 
-def check_15m(df):
-    df = session_filter(df)
-    if df is None or len(df) < 20:
-        return None
+def find_15m_radars(df):
+    radars = []
 
     df = df.copy()
-    df["VWAP"] = vwap(df)
+    df["VWAP"] = calculate_vwap(df)
     df["VOL_SMA20"] = df["Volume"].rolling(20).mean()
 
     for i in range(20, len(df)):
-        c = df.iloc[i]
-        op = c["Open"]
 
-        if op <= 0:
+        row = df.iloc[i]
+
+        if pd.isna(row["VWAP"]) or pd.isna(row["VOL_SMA20"]):
+            continue
+
+        open_price = row["Open"]
+
+        if open_price <= 0:
             continue
 
         cond = (
-            c["Volume"] > 500000 and
-            c["Volume"] * c["Close"] > 150000000 and
-            ((c["High"] - c["Low"]) / op) * 100 > 0.6 and
-            (abs(c["Close"] - c["Open"]) / op) * 100 > 0.6 and
-            c["Close"] > c["VWAP"] and
-            c["Volume"] > 2 * c["VOL_SMA20"] and
-            c["Close"] > c["Open"]
+            row["Close"] > row["VWAP"] and
+            row["Volume"] > 500000 and
+            row["Volume"] > 2 * row["VOL_SMA20"] and
+            abs(row["Close"] - row["Open"]) / open_price > 0.006 and
+            (row["High"] - row["Low"]) / open_price > 0.006 and
+            row["Close"] > row["Open"]
         )
 
         if cond:
-            radar_time = df.index[i] + timedelta(minutes=15)  # candle close fix
 
-            return {
-                "time": radar_time,
-                "close": float(c["Close"])
-            }
+            # 🔥 IMPORTANT: NEXT 15M CANDLE CLOSE TIME
+            radar_time = df.index[i] + pd.Timedelta(minutes=15)
 
-    return None
+            radars.append(radar_time)
+
+    return radars
 
 # =========================
 # 5M TRADE
 # =========================
 
-def check_5m(df, radar_time):
-    df = session_filter(df)
+def find_5m_trade(df5, radar_time):
 
-    if df is None or df.empty:
-        return None
+    df = df5[df5.index > radar_time].copy()
 
-    df = df[df.index > radar_time]
     if df.empty:
         return None
 
-    df = df.copy()
-    df["VWAP"] = vwap(df)
-
     for i in range(len(df)):
-        c = df.iloc[i]
 
-        if c["Low"] <= c["VWAP"] <= c["High"] and c["Close"] > c["Open"]:
+        row = df.iloc[i]
 
-            entry = c["High"]
-            sl = c["Low"]
+        vwap_touch = row["Low"] <= row["VWAP"] <= row["High"]
+        bullish = row["Close"] > row["Open"]
+
+        if vwap_touch and bullish:
+
+            entry = row["High"]
+            sl = row["Low"]
             risk = entry - sl
 
             if risk <= 0:
                 continue
 
-            target = entry + (risk * 2)
-
             return {
                 "time": df.index[i],
                 "entry": round(entry, 2),
                 "sl": round(sl, 2),
-                "target": round(target, 2)
+                "target": round(entry + 2 * risk, 2)
             }
 
     return None
+    
+def run_range(symbol, df15, df5, d1, d2):
+
+    radars = find_15m_radars(df15)
+
+    results = []
+
+    for r in radars:
+
+        if not (d1 <= r.date() <= d2):
+            continue
+
+        trade = find_5m_trade(df5, r)
+
+        results.append({
+            "symbol": symbol,
+            "radar": {"time": r},
+            "trade": trade   # can be None
+        })
+
+    return results
 
 # =========================
 # SCAN STOCK
@@ -256,14 +274,16 @@ def scan_all(date=None):
 # =========================
 
 def format_result(r):
+
     msg = f"📊 {r['symbol']}\n"
     msg += f"15M: {r['radar']['time']}\n"
 
-    if r.get("trade"):
+    if r["trade"]:
         t = r["trade"]
-        msg += f"5M: {t['time']}\nEntry: {t['entry']} SL: {t['sl']} TG: {t['target']}\n"
+        msg += f"5M: {t['time']}\n"
+        msg += f"Entry: {t['entry']} SL: {t['sl']} TG: {t['target']}\n"
     else:
-        msg += "RADAR ONLY\n"
+        msg += "5M: NO SETUP\n"
 
     return msg
 
