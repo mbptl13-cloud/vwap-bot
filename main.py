@@ -247,12 +247,13 @@ def find_5m_trade(df5, radar_time):
 
     df = df5.copy()
 
-    # only after 15m candle close
+    # Only after 15M candle closes
     df = df[df.index > radar_time]
 
     if df.empty:
         return None
 
+    # Calculate VWAP
     df["VWAP"] = calculate_vwap(df)
 
     for i in range(1, len(df)):
@@ -263,30 +264,52 @@ def find_5m_trade(df5, radar_time):
             continue
 
         # =====================================
-        # VWAP PULLBACK
+        # VWAP SCORE SYSTEM
         # =====================================
 
-        if not (
-            float(row["Low"]) <= float(row["VWAP"]) * 1.002
+        score = 0
+
+        # 1. Clean VWAP Touch
+        if (
+            float(row["Low"]) <= float(row["VWAP"]) * 1.001
             and float(row["Close"]) > float(row["VWAP"])
         ):
-            continue
+            score += 1
 
-        # =====================================
-        # BREAKOUT CONFIRMATION
-        # =====================================
+        # 2. Strong Rejection
+        if (
+            (float(row["Close"]) - float(row["Low"])) >
+            ((float(row["High"]) - float(row["Low"])) * 0.5)
+        ):
+            score += 1
 
-        if not (
+        # 3. Close Above VWAP
+        if float(row["Close"]) > float(row["VWAP"]):
+            score += 1
+
+        # 4. Breakout
+        if (
             float(row["Close"]) > float(prev["High"])
             and float(row["Close"]) > float(row["Open"])
         ):
+            score += 1
+
+        # 5. Volume Expansion
+        if float(row["Volume"]) > float(prev["Volume"]) * 1.2:
+            score += 1
+
+        # Minimum acceptable quality
+        if score < 4:
             continue
 
         # =====================================
-        # ENTRY / SL / TARGET
+        # ENTRY / STOPLOSS / TARGET
         # =====================================
 
+        # Entry = breakout candle high
         entry = round(float(row["High"]), 2)
+
+        # Moderate SL = VWAP
         sl = round(float(row["VWAP"]), 2)
 
         actual_risk = round(entry - sl, 2)
@@ -294,23 +317,21 @@ def find_5m_trade(df5, radar_time):
         if actual_risk <= 0:
             continue
 
-        # minimum SL = 0.2%
-        min_risk = round(entry * 0.002, 2)
-
+        # Minimum SL = 0.3%
+        min_risk = round(entry * 0.003, 2)
         if actual_risk < min_risk:
             continue
 
-        # maximum SL = 0.5%
+        # Maximum SL = 0.5%
         max_risk = round(entry * 0.005, 2)
-
         if actual_risk > max_risk:
             continue
 
-        # RR = 1:2
+        # Target = 1:2 RR
         target = round(entry + (actual_risk * 2), 2)
 
         # =====================================
-        # RESULT CHECK
+        # RESULT CHECK (WIN / LOSS / OPEN)
         # =====================================
 
         result = "OPEN"
@@ -318,9 +339,13 @@ def find_5m_trade(df5, radar_time):
         future_df = df.iloc[i:]
 
         for _, next_row in future_df.iterrows():
-            hit_sl = float(next_row["Low"]) <= sl
-            hit_target = float(next_row["High"]) >= target
+            candle_low = float(next_row["Low"])
+            candle_high = float(next_row["High"])
 
+            hit_sl = candle_low <= sl
+            hit_target = candle_high >= target
+
+            # Conservative assumption
             if hit_target and hit_sl:
                 result = "LOSS"
                 break
@@ -338,7 +363,8 @@ def find_5m_trade(df5, radar_time):
             "entry": entry,
             "sl": sl,
             "target": target,
-            "result": result
+            "result": result,
+            "score": f"{score}/5"
         }
 
     return None
