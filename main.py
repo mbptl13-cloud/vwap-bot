@@ -271,7 +271,7 @@ def find_5m_trade(df5, radar_time):
 
         # 1. Clean VWAP Touch
         if (
-            float(row["Low"]) <= float(row["VWAP"]) * 1.001
+            float(row["Low"]) <= float(row["VWAP"]) * 1.002
             and float(row["Close"]) > float(row["VWAP"])
         ):
             score += 1
