@@ -345,9 +345,11 @@ def find_5m_trade(df5, radar_time):
             hit_sl = candle_low <= sl
             hit_target = candle_high >= target
 
-            # Conservative assumption
-            if hit_target and hit_sl:
+            if abs(candle_open - target) < abs(candle_open - sl):
+                result = "WIN"
+            else:
                 result = "LOSS"
+                
                 break
 
             elif hit_target:
