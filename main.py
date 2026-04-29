@@ -317,7 +317,7 @@ def find_5m_trade(df5, radar_time):
         buffer = entry * buffer_pct
 
         # Moderate SL = VWAP
-        sl = round(vwap - buffer, 2)
+        sl = vwap - buffer
 
         actual_risk = entry - sl
 
