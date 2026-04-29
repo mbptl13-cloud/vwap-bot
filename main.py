@@ -254,7 +254,7 @@ def find_5m_trade(df5, radar_time):
         return None
 
     # Calculate VWAP
-    df5["VWAP"] = calculate_vwap_5m(df5)
+    df["VWAP"] = calculate_vwap(df)
 
     for i in range(1, len(df)):
         row = df.iloc[i]
@@ -309,7 +309,7 @@ def find_5m_trade(df5, radar_time):
         # Entry = breakout candle high
         entry = round(float(row["High"]), 2)
 
-        vwap = float(row["VWAP"])
+        vwap = float(prev["VWAP"])
 
         # Moderate SL = VWAP
         sl = round(vwap , 2)
@@ -325,8 +325,8 @@ def find_5m_trade(df5, radar_time):
         min_risk = 0.003
 
         # Maximum SL = 1.2%
-        max_risk = 0.012
-        if not (min_risk <= risk_pct <= max_risk):
+        
+        if not (min_risk <= risk_pct):
             continue 
 
         # Target = 1:2 RR
