@@ -345,21 +345,19 @@ def find_5m_trade(df5, radar_time):
             hit_sl = candle_low <= sl
             hit_target = candle_high >= target
 
+            if hit_target:
+                result = "WIN"
+                break
+
+            else hit_sl:
+                result = "LOSS"
+                break
+                 
             if abs(candle_open - target) < abs(candle_open - sl):
                 result = "WIN"
             else:
                 result = "LOSS"
                 
-                break
-
-                elif hit_target:
-                result = "WIN"
-                break
-
-                elif hit_sl:
-                result = "LOSS"
-                break
-
         return {
             "time": df.index[i] + pd.Timedelta(minutes=5),
             "entry": entry,
