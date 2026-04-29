@@ -21,7 +21,7 @@ PORT = int(os.environ.get("PORT", 10000))
 app = Flask(__name__)
 
 # =====================================
-# ANTI DUPLICATE SYSTEM
+# ANTI DUPLICATE
 # =====================================
 
 LAST_REQUEST = {}
@@ -75,17 +75,20 @@ def send(chat_id, text):
 def set_webhook():
     try:
         url = f"{RENDER_URL}/webhook"
+
         requests.get(
             f"{BASE_URL}/setWebhook?url={url}",
             timeout=20
         )
+
         print("Webhook set:", url)
+
     except Exception as e:
         print("Webhook Error:", e)
 
 
 # =====================================
-# DATA HELPERS
+# DATA
 # =====================================
 
 def get_data(symbol, interval):
@@ -93,7 +96,7 @@ def get_data(symbol, interval):
         df = yf.download(
             symbol,
             interval=interval,
-            period="30d",   # IMPORTANT FIX
+            period="30d",
             progress=False
         )
 
@@ -145,8 +148,6 @@ def session_filter(df):
     if df is None or df.empty:
         return None
 
-    df = df.copy()
-
     try:
         df = df.between_time("09:45", "13:30")
     except Exception:
@@ -189,15 +190,14 @@ def calculate_vwap(df):
 
 
 # =====================================
-# 15M RADAR LOGIC
+# 15M RADAR
 # =====================================
 
-def find_15m_radar(df):
+def find_15m_radars(df):
     if df is None or len(df) < 20:
         return None
 
     df = df.copy()
-
     df["VWAP"] = calculate_vwap(df)
     df["VOL_SMA20"] = df["Volume"].rolling(20).mean()
 
@@ -225,8 +225,6 @@ def find_15m_radar(df):
         )
 
         if cond:
-            # VERY IMPORTANT:
-            # 11:15 candle closes at 11:30
             radar_time = df.index[i] + pd.Timedelta(minutes=15)
 
             return {
@@ -238,7 +236,7 @@ def find_15m_radar(df):
 
 
 # =====================================
-# 5M ENTRY LOGIC
+# 5M ENTRY
 # =====================================
 
 def find_5m_trade(df5, radar_time):
@@ -246,8 +244,6 @@ def find_5m_trade(df5, radar_time):
         return None
 
     df = df5.copy()
-
-    # only after 15m candle close
     df = df[df.index > radar_time]
 
     if df.empty:
@@ -289,46 +285,40 @@ def find_5m_trade(df5, radar_time):
 
 
 # =====================================
-# SINGLE STOCK SCAN
+# SINGLE SCAN
 # =====================================
 
 def scan_stock(symbol, date=None):
-
     df15 = to_ist(get_data(symbol, "15m"))
     df5 = to_ist(get_data(symbol, "5m"))
 
     if df15 is None:
         return None
 
-    # Apply session filter first
     df15 = session_filter(df15)
     df5 = session_filter(df5)
 
     if df15 is None:
         return None
 
-    # Apply date filter if user gives date
-    if date:
-        df15 = filter_date(df15, date)
-        df5 = filter_date(df5, date)
+    radar = find_15m_radars(df15)
 
-        if df15 is None:
-            return None
-
-    # NEW radar logic
-    radars = find_15m_radars(df15)
-
-    if not radars:
+    if not radar:
         return None
 
-    # First valid radar
-    radar_time = radars[0]
+    radar_time = radar["time"]
 
-    # 5M check only after 15M candle closes
+    if date:
+        if radar_time.date() != pd.to_datetime(date).date():
+            return None
+
     trade = None
 
     if df5 is not None:
-        trade = find_5m_trade(df5, radar_time)
+        temp5 = filter_date(df5, radar_time.strftime("%Y-%m-%d"))
+
+        if temp5 is not None:
+            trade = find_5m_trade(temp5, radar_time)
 
     return {
         "symbol": symbol,
@@ -339,9 +329,56 @@ def scan_stock(symbol, date=None):
     }
 
 
+# =====================================
+# RANGE SCAN
+# =====================================
+
+def run_range(symbol, d1, d2):
+    df15 = to_ist(get_data(symbol, "15m"))
+    df5 = to_ist(get_data(symbol, "5m"))
+
+    if df15 is None:
+        return []
+
+    df15 = session_filter(df15)
+    df5 = session_filter(df5)
+
+    if df15 is None:
+        return []
+
+    start_date = pd.to_datetime(d1).date()
+    end_date = pd.to_datetime(d2).date()
+
+    radar = find_15m_radars(df15)
+
+    if not radar:
+        return []
+
+    radar_time = radar["time"]
+    radar_date = radar_time.date()
+
+    if not (start_date <= radar_date <= end_date):
+        return []
+
+    trade = None
+
+    if df5 is not None:
+        temp5 = filter_date(df5, radar_time.strftime("%Y-%m-%d"))
+
+        if temp5 is not None:
+            trade = find_5m_trade(temp5, radar_time)
+
+    return [{
+        "symbol": symbol,
+        "radar": {
+            "time": radar_time
+        },
+        "trade": trade
+    }]
+
 
 # =====================================
-# ALL STOCK SCAN
+# ALL SCAN
 # =====================================
 
 def scan_all(scan_date=None):
@@ -354,74 +391,6 @@ def scan_all(scan_date=None):
             results.append(result)
 
     return results
-
-
-        # =========================
-    # RANGE SCAN SAFE VERSION
-    # =========================
-
-    if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2} TO \d{4}-\d{2}-\d{2}", text):
-
-        sym, d1, _, d2 = text.split()
-        symbol = sym + ".NS"
-
-        send(chat_id, f"📊 RANGE SCANNING {sym}")
-
-        df15 = to_ist(get_data(symbol, "15m"))
-        df5 = to_ist(get_data(symbol, "5m"))
-
-        if df15 is None:
-            send(chat_id, "No data available")
-            return "ok"
-
-        df15 = session_filter(df15)
-        df5 = session_filter(df5)
-
-        if df15 is None:
-            send(chat_id, "No valid 15M data")
-            return "ok"
-
-        start_date = pd.to_datetime(d1).date()
-        end_date = pd.to_datetime(d2).date()
-
-        found = False
-
-        for single_date in pd.date_range(start=start_date, end=end_date):
-
-            date_str = single_date.strftime("%Y-%m-%d")
-
-            temp15 = filter_date(df15, date_str)
-            temp5 = filter_date(df5, date_str)
-
-            if temp15 is None or temp15.empty:
-                continue
-
-            radars = find_15m_radars(temp15)
-
-            if not radars:
-                continue
-
-            radar_time = radars[0]
-
-            trade = None
-            if temp5 is not None and not temp5.empty:
-                trade = find_5m_trade(temp5, radar_time)
-
-            result = {
-                "symbol": symbol,
-                "radar": {
-                    "time": radar_time
-                },
-                "trade": trade
-            }
-
-            send(chat_id, format_result(result))
-            found = True
-
-        if not found:
-            send(chat_id, "No setups in range")
-
-        return "ok"
 
 
 # =====================================
@@ -443,7 +412,7 @@ def format_result(r):
 
 
 # =====================================
-# WEBHOOK COMMAND ENGINE
+# WEBHOOK
 # =====================================
 
 @app.route("/webhook", methods=["POST"])
@@ -457,19 +426,13 @@ def webhook():
     chat_id = msg["chat"]["id"]
     text = msg.get("text", "").strip().upper()
 
-    # ANTI DUPLICATE
     if is_duplicate(chat_id, text):
-        print("Duplicate ignored:", text)
         return "ok"
 
     today = datetime.now().strftime("%Y-%m-%d")
 
-    # ---------------------------------
-    # LIVE
-    # ---------------------------------
-
     if text == "LIVE":
-        send(chat_id, "📡 LIVE SCANNING (09:45–13:30 ONLY)")
+        send(chat_id, "📡 LIVE SCANNING")
 
         results = scan_all(today)
 
@@ -481,10 +444,6 @@ def webhook():
             send(chat_id, format_result(r))
 
         return "ok"
-
-    # ---------------------------------
-    # RADAR TODAY
-    # ---------------------------------
 
     if text == "RADAR TODAY":
         send(chat_id, "📊 RADAR TODAY")
@@ -499,11 +458,6 @@ def webhook():
             send(chat_id, f"{r['symbol']} → {r['radar']['time']}")
 
         return "ok"
-
-    # ---------------------------------
-    # DATE RADAR
-    # Example: 2026-04-27 RADAR
-    # ---------------------------------
 
     if re.fullmatch(r"\d{4}-\d{2}-\d{2} RADAR", text):
         scan_date = text.replace(" RADAR", "")
@@ -521,11 +475,6 @@ def webhook():
 
         return "ok"
 
-    # ---------------------------------
-    # DATE ONLY
-    # Example: 2026-04-27
-    # ---------------------------------
-
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
         send(chat_id, f"📅 SCANNING {text}")
 
@@ -540,15 +489,8 @@ def webhook():
 
         return "ok"
 
-    # ---------------------------------
-    # RANGE
-    # Example:
-    # BHEL 2026-04-21 TO 2026-04-28
-    # ---------------------------------
-
     if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2} TO \d{4}-\d{2}-\d{2}", text):
         sym, d1, _, d2 = text.split()
-
         symbol = sym + ".NS"
 
         send(chat_id, f"📊 RANGE SCANNING {sym}")
@@ -564,15 +506,8 @@ def webhook():
 
         return "ok"
 
-    # ---------------------------------
-    # STOCK + DATE
-    # Example:
-    # BHEL 2026-04-27
-    # ---------------------------------
-
     if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2}", text):
         sym, scan_date = text.split()
-
         symbol = sym + ".NS"
 
         send(chat_id, f"📊 SCANNING {symbol}")
@@ -586,15 +521,11 @@ def webhook():
 
         return "ok"
 
-    # ---------------------------------
-    # START
-    # ---------------------------------
-
     if text == "/START":
         send(
             chat_id,
             "🤖 HYBRID FNO BOT READY\n\n"
-            "Commands:\n\n"
+            "Commands:\n"
             "LIVE\n"
             "RADAR TODAY\n"
             "2026-04-06\n"
@@ -608,21 +539,13 @@ def webhook():
     return "ok"
 
 
-# =====================================
-# HOME
-# =====================================
-
 @app.route("/")
 def home():
-    return "BOT RUNNING SAFE MODE"
+    return "BOT RUNNING"
 
-
-# =====================================
-# START
-# =====================================
 
 if __name__ == "__main__":
-    print("🚀 BOT STARTING SAFE MODE")
+    print("🚀 BOT STARTING")
 
     set_webhook()
 
