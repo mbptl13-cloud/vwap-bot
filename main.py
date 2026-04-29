@@ -303,31 +303,31 @@ def scan_stock(symbol, date=None):
     if df15 is None:
         return None
 
+    # Find ALL radar candles
     radars = find_15m_radars(df15)
 
-if not radars:
-    return None
+    if not radars:
+        return None
 
-selected_radar = None
+    selected_radar = None
 
-for radar in radars:
-    radar_time = radar["time"]
+    for radar in radars:
+        radar_time = radar["time"]
 
-    if date:
-        if radar_time.date() != pd.to_datetime(date).date():
-            continue
+        # if specific date requested
+        if date:
+            target_date = pd.to_datetime(date).date()
 
-    selected_radar = radar
-    break
+            if radar_time.date() != target_date:
+                continue
 
-if not selected_radar:
-    return None
+        selected_radar = radar
+        break
 
-radar_time = selected_radar["time"]
+    if not selected_radar:
+        return None
 
-    if date:
-        if radar_time.date() != pd.to_datetime(date).date():
-            return None
+    radar_time = selected_radar["time"]
 
     trade = None
 
