@@ -349,7 +349,7 @@ def find_5m_trade(df5, radar_time):
                 result = "WIN"
                 break
 
-            else hit_sl:
+            elif hit_sl:
                 result = "LOSS"
                 break
                  
