@@ -261,12 +261,12 @@ def find_5m_trade(df5, radar_time):
         prev = df.iloc[i - 1]
         current_time = row.name.time()
 
-    if not (
-        pd.to_datetime("09:45").time()
-        <= current_time
-        <= pd.to_datetime("13:30").time()
-    ):
-        continue
+        if not (
+            pd.to_datetime("09:45").time()
+            <= current_time
+            <= pd.to_datetime("13:30").time()
+        ):
+            continue
 
         # =====================================
         # VWAP SCORE SYSTEM
