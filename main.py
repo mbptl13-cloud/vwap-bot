@@ -341,11 +341,13 @@ def run_range(symbol, d1, d2):
 
 def format_result(r):
     msg = f"📊 {r['symbol']}\n"
-    msg += f"15M: {r['radar']['time']}\n"
+    t15 = r['radar']['time'].strftime("%Y-%m-%d %H:%M")
+    msg += f"15M: {t15}\n"
 
     if r["trade"]:
         t = r["trade"]
-        msg += f"5M: {t['time']}\n"
+        t5 = t['time'].strftime("%Y-%m-%d %H:%M")
+        msg += f"5M: {t5}\n"
         msg += f"Score: {t['score']}\n"
         msg += f"Entry: {t['entry']} SL: {t['sl']} TG: {t['target']}\n"
         msg += f"Result: {t['result']}"
@@ -392,6 +394,36 @@ def webhook():
                 send(chat_id, f"{r['symbol']} → {r['radar']['time']} → NO 5M SETUP")
 
         return "ok"
+
+      if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+          send(chat_id, f"📅 SCANNING {text}")
+
+          results = scan_all(text)
+
+          if not results:
+              send(chat_id, "No setups found")
+              return "ok"
+
+          for r in results:
+              send(chat_id, format_result(r))
+
+          return "ok"
+
+      if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2}", text):
+          sym, scan_date = text.split()
+          symbol = sym + ".NS"
+
+          send(chat_id, f"📊 SCANNING {symbol}")
+
+          result = scan_stock(symbol, scan_date)
+
+          if result:
+              send(chat_id, format_result(result))
+          else:
+              send(chat_id, "No setup found")
+
+          return "ok"
+    
 
     send(chat_id, "Command OK")
     return "ok"
