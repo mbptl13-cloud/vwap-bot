@@ -342,28 +342,24 @@ def find_5m_trade(df5, radar_time):
         # =====================================
 
         result = "OPEN"
+        for j in range(i + 1, len(df)):
+            next_row = df.iloc[j]
 
-    for j in range(i + 1, len(df)):
-        next_row = df.iloc[j]
+            if next_row.name.time() > pd.to_datetime("15:30").time():
+                break
 
-    # ✅ STOP CHECK AFTER 15:30
-        if next_row.name.time() > pd.to_datetime("15:30").time():
-            break
+            low = float(next_row["Low"])
+            high = float(next_row["High"])
 
-        low = float(next_row["Low"])
-        high = float(next_row["High"])
+            if low <= sl:
+                result = "LOSS"
+                break
 
-    # SL first (conservative)
-        if low <= sl:
-            result = "LOSS"
-            break
+            if high >= target:
+                result = "WIN"
+                break
 
-    # Target
-        if high >= target:
-            result = "WIN"
-            break
-        
-    return {
+        return {
             "time": df.index[i] + pd.Timedelta(minutes=5),
             "entry": entry,
             "sl": sl,
@@ -372,7 +368,7 @@ def find_5m_trade(df5, radar_time):
             "score": f"{score}/5"
         }
 
-return None
+    return None
 
 # =====================================
 # SINGLE SCAN
