@@ -259,9 +259,14 @@ def find_5m_trade(df5, radar_time):
     for i in range(1, len(df)):
         row = df.iloc[i]
         prev = df.iloc[i - 1]
+        current_time = row.name.time()
 
-        if pd.isna(row["VWAP"]):
-            continue
+    if not (
+        pd.to_datetime("09:45").time()
+        <= current_time
+        <= pd.to_datetime("13:30").time()
+    ):
+        continue
 
         # =====================================
         # VWAP SCORE SYSTEM
@@ -338,22 +343,25 @@ def find_5m_trade(df5, radar_time):
 
         result = "OPEN"
 
-        future_df = df.iloc[i + 1:]
+for j in range(i + 1, len(df)):
+    next_row = df.iloc[j]
 
-        for _, next_row in future_df.iterrows():
-            candle_low = float(next_row["Low"])
-            candle_high = float(next_row["High"])
+    # ✅ STOP CHECK AFTER 15:30
+    if next_row.name.time() > pd.to_datetime("15:30").time():
+        break
 
-            hit_sl = candle_low <= sl
-            hit_target = candle_high >= target
+    low = float(next_row["Low"])
+    high = float(next_row["High"])
 
-            if hit_target:
-                result = "WIN"
-                break
+    # SL first (conservative)
+    if low <= sl:
+        result = "LOSS"
+        break
 
-            elif hit_sl:
-                result = "LOSS"
-                break
+    # Target
+    if high >= target:
+        result = "WIN"
+        break
         
         return {
             "time": df.index[i] + pd.Timedelta(minutes=5),
@@ -372,13 +380,11 @@ def find_5m_trade(df5, radar_time):
 
 def scan_stock(symbol, date=None):
     df15 = to_ist(get_data(symbol, "15m"))
-    df5 = to_ist(get_data(symbol, "5m"))
 
     if df15 is None:
         return None
 
     df15 = session_filter(df15)
-    df5 = session_filter(df5)
 
     if df15 is None:
         return None
@@ -432,13 +438,11 @@ def scan_stock(symbol, date=None):
 
 def run_range(symbol, d1, d2):
     df15 = to_ist(get_data(symbol, "15m"))
-    df5 = to_ist(get_data(symbol, "5m"))
 
     if df15 is None:
         return []
 
     df15 = session_filter(df15)
-    df5 = session_filter(df5)
 
     if df15 is None:
         return []
