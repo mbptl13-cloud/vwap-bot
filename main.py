@@ -376,6 +376,7 @@ def find_5m_trade(df5, radar_time):
 
 def scan_stock(symbol, date=None):
     df15 = to_ist(get_data(symbol, "15m"))
+    df5 = to_ist(get_data(symbol, "5m"))
 
     if df15 is None:
         return None
@@ -434,6 +435,7 @@ def scan_stock(symbol, date=None):
 
 def run_range(symbol, d1, d2):
     df15 = to_ist(get_data(symbol, "15m"))
+    df5 = to_ist(get_data(symbol, "5m"))
 
     if df15 is None:
         return []
