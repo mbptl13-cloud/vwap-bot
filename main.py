@@ -80,8 +80,19 @@ def filter_date(df, d):
 # ================= VWAP =================
 
 def vwap(df):
+    df = df.copy()
+
     tp = (df["High"] + df["Low"] + df["Close"]) / 3
-    return (tp * df["Volume"]).cumsum() / df["Volume"].cumsum()
+
+    df["TPV"] = tp * df["Volume"]
+
+    # GROUP BY DATE → RESET DAILY
+    df["CUM_TPV"] = df.groupby(df.index.date)["TPV"].cumsum()
+    df["CUM_VOL"] = df.groupby(df.index.date)["Volume"].cumsum()
+
+    df["VWAP"] = df["CUM_TPV"] / df["CUM_VOL"]
+
+    return df["VWAP"]
 
 # ================= 15M RADAR =================
 
