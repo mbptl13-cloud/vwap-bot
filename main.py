@@ -7,6 +7,7 @@ import yfinance as yf
 
 from flask import Flask, request
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 BOT_TOKEN = "8689896067:AAEuHnXG8f7orhfygCKvHoDItQmJTqzGGB4"
 RENDER_URL = "https://your-url.onrender.com"
@@ -18,7 +19,7 @@ app = Flask(__name__)
 
 # ================= CONFIG =================
 
-DATE_DELAY = 1   # delay for bulk scan (avoid timeout)
+MAX_THREADS = 10   # speed control
 
 FNO_STOCKS = [
     "ADANIGREEN.NS","BHEL.NS","RELIANCE.NS","TCS.NS","TATAPOWER.NS"
@@ -29,26 +30,33 @@ FNO_STOCKS = [
 def send(chat_id, text):
     try:
         requests.post(f"{BASE_URL}/sendMessage",
-                      json={"chat_id": chat_id, "text": text})
+                      json={"chat_id": chat_id, "text": text},
+                      timeout=10)
     except:
         pass
 
 # ================= DATA =================
 
 def get_data(symbol, interval):
-    df = yf.download(symbol, interval=interval, period="30d", progress=False)
+    try:
+        df = yf.download(symbol, interval=interval, period="30d", progress=False)
 
-    if df is None or df.empty:
+        if df is None or df.empty:
+            return None
+
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = [c[0] for c in df.columns]
+
+        return df[["Open","High","Low","Close","Volume"]].dropna()
+    except:
         return None
-
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = [c[0] for c in df.columns]
-
-    return df[["Open","High","Low","Close","Volume"]].dropna()
 
 
 def to_ist(df):
-    if df is None: return None
+    if df is None:
+        return None
+
+    df = df.copy()
     df.index = pd.to_datetime(df.index)
 
     try:
@@ -61,34 +69,28 @@ def to_ist(df):
     return df
 
 
-def session_filter(df):
-    try:
-        df = df.between_time("09:15","15:30")
-        return df if not df.empty else None
-    except:
+def filter_date(df, date):
+    if df is None:
         return None
 
-
-def filter_date(df, date):
     d = pd.to_datetime(date).date()
     df = df[df.index.date == d]
+
     return df if not df.empty else None
 
 
-# ================= VWAP FIX =================
+# ================= VWAP =================
 
 def calculate_vwap_intraday(df):
     df = df.copy()
 
     df["DATE"] = df.index.date
-    df["TP"] = (df["High"] + df["Low"] + df["Close"]) / 3
+    tp = (df["High"] + df["Low"] + df["Close"]) / 3
 
     df["CUM_VOL"] = df.groupby("DATE")["Volume"].cumsum()
-    df["CUM_TPV"] = (df["TP"] * df["Volume"]).groupby(df["DATE"]).cumsum()
+    df["CUM_TPV"] = (tp * df["Volume"]).groupby(df["DATE"]).cumsum()
 
-    df["VWAP"] = df["CUM_TPV"] / df["CUM_VOL"]
-
-    return df["VWAP"]
+    return df["CUM_TPV"] / df["CUM_VOL"]
 
 
 # ================= 15M RADAR =================
@@ -98,7 +100,7 @@ def find_15m(df):
     df["VWAP"] = calculate_vwap_intraday(df)
     df["VOL_SMA"] = df["Volume"].rolling(20).mean()
 
-    out = []
+    radars = []
 
     for i in range(19, len(df)):
         r = df.iloc[i]
@@ -112,11 +114,11 @@ def find_15m(df):
             and r["Volume"] > 2 * r["VOL_SMA"]
             and (r["Close"] - r["Open"]) / r["Open"] > 0.006
         ):
-            out.append({
+            radars.append({
                 "time": df.index[i] + pd.Timedelta(minutes=15)
             })
 
-    return out
+    return radars
 
 
 # ================= 5M TRADE =================
@@ -136,8 +138,8 @@ def find_5m(df, radar_time):
         if not (pd.to_datetime("09:45").time() <= t <= pd.to_datetime("13:30").time()):
             continue
 
-        # SCORE
         score = 0
+
         if r["Low"] <= r["VWAP"] * 1.002 and r["Close"] > r["VWAP"]:
             score += 1
         if r["Close"] > p["High"]:
@@ -150,7 +152,6 @@ def find_5m(df, radar_time):
         if score < 4:
             continue
 
-        # ENTRY
         entry = round(r["High"], 2)
         sl = round(p["VWAP"], 2)
 
@@ -160,13 +161,11 @@ def find_5m(df, radar_time):
 
         risk_pct = risk / entry
 
-        # STRICT FILTER (THIS FIXES YOUR ISSUE)
         if not (0.003 <= risk_pct <= 0.012):
             continue
 
         target = round(entry + (risk * 2), 2)
 
-        # RESULT CHECK
         result = "OPEN"
 
         for j in range(i + 1, len(df)):
@@ -205,8 +204,6 @@ def scan_stock(sym, date):
         return None
 
     df15 = filter_date(df15, date)
-    df15 = session_filter(df15)
-
     if df15 is None:
         return None
 
@@ -224,7 +221,6 @@ def scan_stock(sym, date):
             if df5d is not None:
                 trade = find_5m(df5d, r["time"])
 
-        # FIRST VALID TRADE ONLY
         if trade:
             return {"symbol": sym, "radar": r, "trade": trade}
 
@@ -232,24 +228,31 @@ def scan_stock(sym, date):
 
 
 def scan_all(date):
-    out = []
-    for s in FNO_STOCKS:
-        r = scan_stock(s, date)
-        if r:
-            out.append(r)
-        time.sleep(DATE_DELAY)
-    return out
+    results = []
+
+    def worker(symbol):
+        return scan_stock(symbol, date)
+
+    with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
+        futures = [executor.submit(worker, s) for s in FNO_STOCKS]
+
+        for f in as_completed(futures):
+            r = f.result()
+            if r:
+                results.append(r)
+
+    return results
 
 
 def run_range(sym, d1, d2):
-    out = []
+    results = []
 
     for d in pd.date_range(d1, d2):
         r = scan_stock(sym, str(d.date()))
         if r:
-            out.append(r)
+            results.append(r)
 
-    return out
+    return results
 
 
 # ================= FORMAT =================
