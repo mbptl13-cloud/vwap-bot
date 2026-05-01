@@ -1,368 +1,250 @@
 import os
 import re
 import time
-import threading
 import requests
 import pandas as pd
 import yfinance as yf
-from flask import Flask, request
 
-# ================= CONFIG =================
+from flask import Flask, request
+from datetime import datetime
+
+# =====================================
+# CONFIG
+# =====================================
 
 BOT_TOKEN = "8695080537:AAFolODguF8s1z88s_57HTVModIrmGojlno"
 RENDER_URL = "https://vwap-bot-ia6r.onrender.com"
+
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 PORT = int(os.environ.get("PORT", 10000))
 
 app = Flask(__name__)
 
-FNO_STOCKS = [
-    "360ONE.NS",
-    "ABB.NS",
-    "APLAPOLLO.NS",
-    "AUBANK.NS",
-    "ADANIENSOL.NS",
-    "ADANIENT.NS",
-    "ADANIGREEN.NS",
-    "ADANIPORTS.NS",
-    "ADANIPOWER.NS",
-    "ABCAPITAL.NS",
-    "ALKEM.NS",
-    "AMBER.NS",
-    "AMBUJACEM.NS",
-    "ANGELONE.NS",
-    "APOLLOHOSP.NS",
-    "ASHOKLEY.NS",
-    "ASIANPAINT.NS",
-    "ASTRAL.NS",
-    "AUROPHARMA.NS",
-    "DMART.NS",
-    "AXISBANK.NS",
-    "BSE.NS",
-    "BAJAJ-AUTO.NS",
-    "BAJFINANCE.NS",
-    "BAJAJFINSV.NS",
-    "BAJAJHLDNG.NS",
-    "BANDHANBNK.NS",
-    "BANKBARODA.NS",
-    "BANKINDIA.NS",
-    "BDL.NS",
-    "BEL.NS",
-    "BHARATFORG.NS",
-    "BHEL.NS",
-    "BPCL.NS",
-    "BHARTIARTL.NS",
-    "BIOCON.NS",
-    "BLUESTARCO.NS",
-    "BOSCHLTD.NS",
-    "BRITANNIA.NS",
-    "CGPOWER.NS",
-    "CANBK.NS",
-    "CDSL.NS",
-    "CHOLAFIN.NS",
-    "CIPLA.NS",
-    "COALINDIA.NS",
-    "COCHINSHIP.NS",
-    "COFORGE.NS",
-    "COLPAL.NS",
-    "CAMS.NS",
-    "CONCOR.NS",
-    "CROMPTON.NS",
-    "CUMMINSIND.NS",
-    "DLF.NS",
-    "DABUR.NS",
-    "DALBHARAT.NS",
-    "DELHIVERY.NS",
-    "DIVISLAB.NS",
-    "DIXON.NS",
-    "DRREDDY.NS",
-    "ETERNAL.NS",
-    "EICHERMOT.NS",
-    "EXIDEIND.NS",
-    "FORCEMOT.NS",
-    "NYKAA.NS",
-    "FORTIS.NS",
-    "GAIL.NS",
-    "GMRAIRPORT.NS",
-    "GLENMARK.NS",
-    "GODFRYPHLP.NS",
-    "GODREJCP.NS",
-    "GODREJPROP.NS",
-    "GRASIM.NS",
-    "HCLTECH.NS",
-    "HDFCAMC.NS",
-    "HDFCBANK.NS",
-    "HDFCLIFE.NS",
-    "HAVELLS.NS",
-    "HEROMOTOCO.NS",
-    "HINDALCO.NS",
-    "HAL.NS",
-    "HINDPETRO.NS",
-    "HINDUNILVR.NS",
-    "HINDZINC.NS",
-    "POWERINDIA.NS",
-    "HUDCO.NS",
-    "HYUNDAI.NS",
-    "ICICIBANK.NS",
-    "ICICIGI.NS",
-    "ICICIPRULI.NS",
-    "IDFCFIRSTB.NS",
-    "ITC.NS",
-    "INDIANB.NS",
-    "IEX.NS",
-    "IOC.NS",
-    "IRFC.NS",
-    "IREDA.NS",
-    "INDUSTOWER.NS",
-    "INDUSINDBK.NS",
-    "NAUKRI.NS",
-    "INFY.NS",
-    "INOXWIND.NS",
-    "INDIGO.NS",
-    "JINDALSTEL.NS",
-    "JSWENERGY.NS",
-    "JSWSTEEL.NS",
-    "JIOFIN.NS",
-    "JUBLFOOD.NS",
-    "KEI.NS",
-    "KPITTECH.NS",
-    "KALYANKJIL.NS",
-    "KAYNES.NS",
-    "KFINTECH.NS",
-    "KOTAKBANK.NS",
-    "LTF.NS",
-    "LICHSGFIN.NS",
-    "LTM.NS",
-    "LT.NS",
-    "LAURUSLABS.NS",
-    "LICI.NS",
-    "LODHA.NS",
-    "LUPIN.NS",
-    "M&M.NS",
-    "MANAPPURAM.NS",
-    "MANKIND.NS",
-    "MARICO.NS",
-    "MARUTI.NS",
-    "MFSL.NS",
-    "MAXHEALTH.NS",
-    "MAZDOCK.NS",
-    "MOTILALOFS.NS",
-    "MPHASIS.NS",
-    "MCX.NS",
-    "MUTHOOTFIN.NS",
-    "NBCC.NS",
-    "NHPC.NS",
-    "NMDC.NS",
-    "NTPC.NS",
-    "NATIONALUM.NS",
-    "NESTLEIND.NS",
-    "NAM-INDIA.NS",
-    "NUVAMA.NS",
-    "OBEROIRLTY.NS",
-    "ONGC.NS",
-    "OIL.NS",
-    "PAYTM.NS",
-    "OFSS.NS",
-    "POLICYBZR.NS",
-    "PGEL.NS",
-    "PIIND.NS",
-    "PNBHOUSING.NS",
-    "PAGEIND.NS",
-    "PATANJALI.NS",
-    "PERSISTENT.NS",
-    "PETRONET.NS",
-    "PIDILITIND.NS",
-    "PPLPHARMA.NS",
-    "POLYCAB.NS",
-    "PFC.NS",
-    "POWERGRID.NS",
-    "PREMIERENE.NS",
-    "PRESTIGE.NS",
-    "PNB.NS",
-    "RBLBANK.NS",
-    "RECLTD.NS",
-    "RVNL.NS",
-    "RELIANCE.NS",
-    "SBICARD.NS",
-    "SBILIFE.NS",
-    "SHREECEM.NS",
-    "SRF.NS",
-    "SAMMAANCAP.NS",
-    "MOTHERSON.NS",
-    "SHRIRAMFIN.NS",
-    "SIEMENS.NS",
-    "SOLARINDS.NS",
-    "SONACOMS.NS",
-    "SBIN.NS",
-    "SAIL.NS",
-    "SUNPHARMA.NS",
-    "SUPREMEIND.NS",
-    "SUZLON.NS",
-    "SWIGGY.NS",
-    "TATACONSUM.NS",
-    "TVSMOTOR.NS",
-    "TCS.NS",
-    "TATAELXSI.NS",
-    "TMPV.NS",
-    "TATAPOWER.NS",
-    "TATASTEEL.NS",
-    "TATATECH.NS",
-    "TECHM.NS",
-    "FEDERALBNK.NS",
-    "INDHOTEL.NS",
-    "PHOENIXLTD.NS",
-    "TITAN.NS",
-    "TORNTPHARM.NS",
-    "TORNTPOWER.NS",
-    "TRENT.NS",
-    "TIINDIA.NS",
-    "UNOMINDA.NS",
-    "UPL.NS",
-    "ULTRACEMCO.NS",
-    "UNIONBANK.NS",
-    "UNITDSPR.NS",
-    "VBL.NS",
-    "VEDL.NS",
-    "VMM.NS",
-    "IDEA.NS",
-    "VOLTAS.NS",
-    "WAAREEENER.NS",
-    "WIPRO.NS",
-    "YESBANK.NS",
-    "ZYDUSLIFE.NS"
-]
+# =====================================
+# ANTI DUPLICATE
+# =====================================
 
-# ================= CONTROL =================
-
-RUNNING = {}
-STOP_FLAG = {}
 LAST_REQUEST = {}
-
-# ================= TELEGRAM =================
-
-def send(chat_id, text):
-    try:
-        requests.post(f"{BASE_URL}/sendMessage",
-                      json={"chat_id": chat_id, "text": text},
-                      timeout=20)
-    except:
-        pass
 
 def is_duplicate(chat_id, text):
     key = f"{chat_id}:{text}"
     now = time.time()
-    if key in LAST_REQUEST and now - LAST_REQUEST[key] < 10:
-        return True
+
+    if key in LAST_REQUEST:
+        if now - LAST_REQUEST[key] < 5:
+            return True
+
     LAST_REQUEST[key] = now
     return False
 
-# ================= DATA =================
+
+# =====================================
+# STOCK LIST
+# =====================================
+
+FNO_STOCKS = [
+    "ADANIGREEN.NS",
+    "BHEL.NS",
+    "RELIANCE.NS",
+    "TCS.NS"
+]
+
+
+# =====================================
+# TELEGRAM SEND
+# =====================================
+
+def send(chat_id, text):
+    try:
+        requests.post(
+            f"{BASE_URL}/sendMessage",
+            json={"chat_id": chat_id, "text": text},
+            timeout=20
+        )
+    except Exception as e:
+        print("Send Error:", e)
+
+
+# =====================================
+# WEBHOOK
+# =====================================
+
+def set_webhook():
+    try:
+        url = f"{RENDER_URL}/webhook"
+        requests.get(f"{BASE_URL}/setWebhook?url={url}", timeout=20)
+        print("Webhook set:", url)
+    except Exception as e:
+        print("Webhook Error:", e)
+
+
+# =====================================
+# DATA
+# =====================================
 
 def get_data(symbol, interval):
-    df = yf.download(symbol, interval=interval, period="30d", progress=False)
+    try:
+        df = yf.download(symbol, interval=interval, period="30d", progress=False)
 
-    if df is None or df.empty:
+        if df is None or df.empty:
+            return None
+
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = [col[0] for col in df.columns]
+
+        df = df"Open", "High", "Low", "Close", "Volume".dropna()
+        return df if not df.empty else None
+
+    except Exception as e:
+        print("Download Error:", symbol, e)
         return None
 
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = [c[0] for c in df.columns]
 
-    df = df[["Open","High","Low","Close","Volume"]].dropna()
+def to_ist(df):
+    if df is None:
+        return None
 
+    df = df.copy()
     df.index = pd.to_datetime(df.index)
-    if df.index.tz is None:
-        df.index = df.index.tz_localize("UTC")
-    df.index = df.index.tz_convert("Asia/Kolkata")
+
+    try:
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("UTC")
+        df.index = df.index.tz_convert("Asia/Kolkata")
+    except Exception:
+        pass
 
     return df
 
-# ================= VWAP =================
 
-def add_vwap(df):
+def session_filter(df):
+    if df is None:
+        return None
+    try:
+        df = df.between_time("09:45", "13:30")
+        return df if not df.empty else None
+    except:
+        return None
+
+
+def filter_date(df, date_str):
+    if df is None:
+        return None
+
+    d = pd.to_datetime(date_str).date()
+    df = df[df.index.date == d]
+
+    return df if not df.empty else None
+
+
+def calculate_vwap(df):
     tp = (df["High"] + df["Low"] + df["Close"]) / 3
-    df["TPV"] = tp * df["Volume"]
+    return (tp * df["Volume"]).cumsum() / df["Volume"].cumsum()
 
-    df["CUM_TPV"] = df.groupby(df.index.date)["TPV"].cumsum()
-    df["CUM_VOL"] = df.groupby(df.index.date)["Volume"].cumsum()
 
-    df["VWAP"] = df["CUM_TPV"] / df["CUM_VOL"]
-    return df
+# =====================================
+# 15M RADAR
+# =====================================
 
-# ================= 15M =================
+def find_15m_radars(df):
+    if df is None or len(df) < 20:
+        return []
 
-def find_15m(df):
-    df = add_vwap(df.copy())
+    df = df.copy()
+    df["VWAP"] = calculate_vwap(df)
     df["VOL_SMA20"] = df["Volume"].rolling(20).mean()
 
     radars = []
 
-    for i in range(20, len(df)):
-        r = df.iloc[i]
+    for i in range(19, len(df)):
+        row = df.iloc[i]
 
-        t = r.name.time()
-        if not (pd.to_datetime("09:45").time() <= t <= pd.to_datetime("13:30").time()):
+        if pd.isna(row["VWAP"]) or pd.isna(row["VOL_SMA20"]):
             continue
 
-        if pd.isna(r["VWAP"]) or pd.isna(r["VOL_SMA20"]):
-            continue
+        body = abs(row["Close"] - row["Open"]) / row["Open"]
+        rng = (row["High"] - row["Low"]) / row["Open"]
 
         if (
-            r["Volume"] > 500000 and
-            (r["Close"] * r["Volume"]) > 150000000 and
-            ((r["High"] - r["Low"]) / r["Open"]) * 100 > 1 and
-            (abs(r["Close"] - r["Open"]) / r["Open"]) * 100 > 0.6 and
-            r["Close"] > r["VWAP"] and
-            r["Volume"] > 2 * r["VOL_SMA20"] and
-            r["Close"] > r["Open"]
+            row["Close"] > row["VWAP"]
+            and row["Volume"] > 500000
+            and row["Volume"] > 2 * row["VOL_SMA20"]
+            and body > 0.006
+            and rng > 0.006
+            and row["Close"] > row["Open"]
         ):
-            radars.append(r.name + pd.Timedelta(minutes=15))
+            radars.append({
+                "time": df.index[i] + pd.Timedelta(minutes=15)
+            })
 
     return radars
 
-# ================= 5M =================
 
-def find_5m(df, radar_time):
-    df = add_vwap(df.copy())
-    df = df[df.index > radar_time]
+# =====================================
+# 5M TRADE
+# =====================================
 
+def find_5m_trade(df5, radar_time):
+    if df5 is None:
+        return None
+
+    df = df5[df5.index > radar_time].copy()
     if df.empty:
         return None
 
+    df["VWAP"] = calculate_vwap(df)
+
     for i in range(1, len(df)):
-        r = df.iloc[i]
-        p = df.iloc[i-1]
+        row = df.iloc[i]
+        prev = df.iloc[i - 1]
 
-        t = r.name.time()
-        if not (pd.to_datetime("09:45").time() <= t <= pd.to_datetime("15:30").time()):
+        if pd.isna(prev["VWAP"]):
             continue
 
+        # Entry window
+        t = row.name.time()
+        if not (pd.to_datetime("09:45").time() <= t <= pd.to_datetime("13:30").time()):
+            continue
+
+        # Score
         score = 0
-        if r["Low"] <= r["VWAP"] * 1.003: score += 1
-        if r["Close"] > p["High"]: score += 1
-        if r["Close"] > r["Open"]: score += 1
-        if r["Volume"] > p["Volume"] * 1.1: score += 1
 
-        if score < 3:
+        if row["Low"] <= row["VWAP"] * 1.002 and row["Close"] > row["VWAP"]:
+            score += 1
+
+        if (row["Close"] - row["Low"]) > ((row["High"] - row["Low"]) * 0.5):
+            score += 1
+
+        if row["Close"] > row["VWAP"]:
+            score += 1
+
+        if row["Close"] > prev["High"] and row["Close"] > row["Open"]:
+            score += 1
+
+        if row["Volume"] > prev["Volume"] * 1.2:
+            score += 1
+
+        if score < 4:
             continue
 
-        entry = round(r["High"], 2)
-
-        sl = round(min(
-            r["VWAP"],
-            r["Low"] - (r["High"] - r["Low"]) * 0.15
-        ), 2)
+        # ENTRY / SL / TARGET
+        entry = round(row["High"], 2)
+        sl = round(prev["VWAP"], 2)
 
         risk = entry - sl
         if risk <= 0:
             continue
 
-        if not (0.003 <= risk/entry <= 0.02):
+        risk_pct = risk / entry
+        if not (0.003 <= risk_pct <= 0.015):
             continue
 
-        target = round(entry + risk * 2, 2)
+        target = round(entry + (risk * 2), 2)
 
+        # RESULT till 15:30
         result = "OPEN"
-        for j in range(i+1, len(df)):
+
+        for j in range(i + 1, len(df)):
             nxt = df.iloc[j]
 
             if nxt.name.time() > pd.to_datetime("15:30").time():
@@ -377,83 +259,105 @@ def find_5m(df, radar_time):
                 break
 
         return {
-            "time": r.name,
+            "time": df.index[i],
             "entry": entry,
             "sl": sl,
             "target": target,
-            "result": result
+            "result": result,
+            "score": f"{score}/5"
         }
 
     return None
 
-# ================= CORE =================
 
-def scan_stock(sym, date):
-    df15 = get_data(sym, "15m")
-    df5 = get_data(sym, "5m")
+# =====================================
+# SCAN
+# =====================================
+
+def scan_stock(symbol, date=None):
+    df15 = to_ist(get_data(symbol, "15m"))
+    df5 = to_ist(get_data(symbol, "5m"))
 
     if df15 is None:
         return None
 
-    df15 = df15[df15.index.date == pd.to_datetime(date).date()]
-    if df15.empty:
+    df15 = session_filter(df15)
+    if df15 is None:
         return None
 
-    radars = find_15m(df15)
-
+    radars = find_15m_radars(df15)
     if not radars:
-        return {"symbol": sym, "radar": f"{date} → NO RADAR", "trade": None}
+        return None
 
-    radar = radars[0]
+    for r in radars:
+        if date and r["time"].date() != pd.to_datetime(date).date():
+            continue
 
-    trade = None
-    if df5 is not None:
-        df5 = df5[df5.index.date == radar.date()]
-        trade = find_5m(df5, radar)
+        trade = None
+        if df5 is not None:
+            temp5 = filter_date(df5, r["time"].strftime("%Y-%m-%d"))
+            if temp5 is not None:
+                trade = find_5m_trade(temp5, r["time"])
 
-    return {"symbol": sym, "radar": radar, "trade": trade}
+        return {"symbol": symbol, "radar": r, "trade": trade}
 
-# ================= FORMAT =================
+    return None
 
-def fmt(r):
-    if r is None:
-        return "No data"
 
-    if isinstance(r["radar"], str):
-        return f"{r['symbol']} → {r['radar']}"
+def run_range(symbol, d1, d2):
+    df15 = to_ist(get_data(symbol, "15m"))
+    df5 = to_ist(get_data(symbol, "5m"))
 
-    msg = f"📊 {r['symbol']}\n15M: {r['radar']}\n"
+    if df15 is None:
+        return []
+
+    df15 = session_filter(df15)
+    if df15 is None:
+        return []
+
+    radars = find_15m_radars(df15)
+
+    results = []
+
+    for r in radars:
+        d = r["time"].date()
+        if not (pd.to_datetime(d1).date() <= d <= pd.to_datetime(d2).date()):
+            continue
+
+        trade = None
+        if df5 is not None:
+            temp5 = filter_date(df5, r["time"].strftime("%Y-%m-%d"))
+            if temp5 is not None:
+                trade = find_5m_trade(temp5, r["time"])
+
+        results.append({"symbol": symbol, "radar": r, "trade": trade})
+
+    return results
+
+
+# =====================================
+# FORMAT
+# =====================================
+
+def format_result(r):
+    msg = f"📊 {r['symbol']}\n"
+    msg += f"15M: {r['radar']['time']}\n"
 
     if r["trade"]:
         t = r["trade"]
-        msg += f"5M: {t['time']}\nEntry: {t['entry']} SL: {t['sl']} TG: {t['target']}\nResult: {t['result']}"
+        msg += f"5M: {t['time']}\n"
+        msg += f"Score: {t['score']}\n"
+        msg += f"Entry: {t['entry']} SL: {t['sl']} TG: {t['target']}\n"
+        msg += f"Result: {t['result']}"
     else:
         msg += "5M: NO SETUP"
 
     return msg
 
-# ================= THREAD WORKERS =================
 
-def range_worker(chat_id, sym, d1, d2):
-    STOP_FLAG[chat_id] = False
-    send(chat_id, f"📊 RANGE {sym}")
-
-    for i, d in enumerate(pd.date_range(d1, d2)):
-
-        if STOP_FLAG.get(chat_id):
-            send(chat_id, "🛑 Scan stopped")
-            return
-
-        if i > 20:
-            send(chat_id, "⚠️ Limit reached")
-            return
-
-        r = scan_stock(sym + ".NS", str(d.date()))
-        send(chat_id, fmt(r))
-
-        time.sleep(0.3)
-
-# ================= WEBHOOK =================
+# =====================================
+# WEBHOOK
+# =====================================
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -462,77 +366,43 @@ def webhook():
     if "message" not in data:
         return "ok"
 
-    chat_id = data["message"]["chat"]["id"]
-    text = data["message"].get("text", "").strip().upper()
+    msg = data["message"]
+    chat_id = msg["chat"]["id"]
+    text = msg.get("text", "").strip().upper()
 
     if is_duplicate(chat_id, text):
         return "ok"
 
-    # STOP
-    if text == "STOP":
-        STOP_FLAG[chat_id] = True
-        send(chat_id, "🛑 Stopping...")
-        return "ok"
-
-    # START
-    if text == "/START":
-        send(chat_id,
-"""🤖 FNO BACKTEST BOT
-
-Commands:
-DATE → 2026-04-27
-STOCK → BHEL 2026-04-27
-RANGE → ADANIGREEN 2026-04-01 TO 2026-04-10
-RADAR → 2026-04-27 RADAR
-
-Send STOP anytime to cancel
-""")
-        return "ok"
-
-    # RADAR
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2} RADAR", text):
-        d = text.split()[0]
-        send(chat_id, f"📡 RADAR {d}")
-
-        for s in FNO_STOCKS:
-            r = scan_stock(s, d)
-            if r and not isinstance(r["radar"], str):
-                send(chat_id, f"{s} → {r['radar']}")
-        return "ok"
-
-    # RANGE (THREAD)
     if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2} TO \d{4}-\d{2}-\d{2}", text):
         sym, d1, _, d2 = text.split()
+        symbol = sym + ".NS"
 
-        STOP_FLAG[chat_id] = True  # stop previous
+        send(chat_id, f"📊 RANGE SCANNING {sym}")
 
-        t = threading.Thread(target=range_worker, args=(chat_id, sym, d1, d2))
-        t.start()
+        results = run_range(symbol, d1, d2)
+
+        if not results:
+            send(chat_id, "No setups in range")
+            return "ok"
+
+        for r in results:
+            if r["trade"]:
+                send(chat_id, format_result(r))
+            else:
+                send(chat_id, f"{r['symbol']} → {r['radar']['time']} → NO 5M SETUP")
 
         return "ok"
 
-    # STOCK DATE
-    if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2}", text):
-        sym, d = text.split()
-        send(chat_id, fmt(scan_stock(sym + ".NS", d)))
-        return "ok"
-
-    # DATE
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
-        send(chat_id, f"📅 SCANNING {text}")
-        for s in FNO_STOCKS:
-            send(chat_id, fmt(scan_stock(s, text)))
-        return "ok"
-
-    send(chat_id, "❌ Invalid command")
+    send(chat_id, "Command OK")
     return "ok"
 
-# ================= RUN =================
 
 @app.route("/")
 def home():
-    return "RUNNING"
+    return "BOT RUNNING"
+
 
 if __name__ == "__main__":
-    requests.get(f"{BASE_URL}/setWebhook?url={RENDER_URL}/webhook")
+    print("🚀 BOT STARTING")
+    set_webhook()
     app.run(host="0.0.0.0", port=PORT)
