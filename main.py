@@ -9,7 +9,6 @@ from datetime import datetime
 # ================= CONFIG =================
 BOT_TOKEN = "8218143624:AAGr75U7tVRiXKES5WIJneD6MotImx66qis"
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
-RENDER_URL = "https://vwap-bot-ia6r.onrender.com"
 PORT = int(os.environ.get("PORT", 10000))
 
 app = Flask(__name__)
@@ -27,7 +26,6 @@ def send(chat_id, text):
     except:
         pass
 
-
 # ================= DATA =================
 def get_data(symbol, interval):
     df = yf.download(symbol, interval=interval, period="30d", progress=False)
@@ -38,7 +36,7 @@ def get_data(symbol, interval):
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = [c[0] for c in df.columns]
 
-    return df[["Open","High","Low","Close","Volume"]].dropna()
+    return df[["Open", "High", "Low", "Close", "Volume"]].dropna()
 
 
 def to_ist(df):
@@ -58,7 +56,6 @@ def to_ist(df):
     return df
 
 
-# ================= SESSION FILTER =================
 def session_filter(df):
     return df.between_time("09:45", "15:30")
 
@@ -69,36 +66,25 @@ def filter_date(df, date):
     return df if not df.empty else None
 
 
-# ================= FIXED VWAP (SESSION ONLY) =================
-def vwap_session(df):
-    df = df.copy()
-    df["date"] = df.index.date
-
+# ================= VWAP (CORRECT) =================
+def vwap(df):
     tp = (df["High"] + df["Low"] + df["Close"]) / 3
-
-    vwap_all = []
-
-    for _, g in df.groupby("date"):
-        vwap = (tp[g.index] * g["Volume"]).cumsum() / g["Volume"].cumsum()
-        vwap_all.append(vwap)
-
-    df["VWAP"] = pd.concat(vwap_all).sort_index()
-    return df
+    return (tp * df["Volume"]).cumsum() / df["Volume"].cumsum()
 
 
 # ================= 15M RADAR =================
 def find_radar(df):
-    df = vwap_session(df)
+    df = df.copy()
+    df["VWAP"] = vwap(df)
     df["VOL_SMA"] = df["Volume"].rolling(20).mean()
 
     radars = []
 
     for i in range(20, len(df)):
         r = df.iloc[i]
-
         t = r.name.time()
 
-        # ✅ RADAR TIME STRICT FILTER
+        # ✅ STRICT RADAR WINDOW
         if not (pd.to_datetime("09:45").time() <= t <= pd.to_datetime("13:30").time()):
             continue
 
@@ -113,7 +99,7 @@ def find_radar(df):
             and r["Volume"] > 2 * r["VOL_SMA"]
             and body > 0.006
         ):
-            radars.append(r.name)
+            radars.append(r.name)   # 🔥 NO SHIFT
 
     return radars
 
@@ -121,43 +107,54 @@ def find_radar(df):
 # ================= 5M TRADE =================
 def find_trade(df5, radar_time):
 
-    # ✅ SAME DAY LOCK (CRITICAL FIX)
+    # 🔥 SAME DAY ONLY
     df = df5[df5.index.date == radar_time.date()]
     df = df[df.index > radar_time].copy()
 
     if df.empty:
         return None
 
-    df = vwap_session(df)
+    df = df.copy()
+    df["VWAP"] = vwap(df)
 
     for i in range(1, len(df)):
-        r = df.iloc[i]
-        p = df.iloc[i - 1]
 
-        t = r.name.time()
+        row = df.iloc[i]
+        prev = df.iloc[i - 1]
 
-        # ✅ ENTRY WINDOW STRICT
+        # 🔥 STRICT NO SAME CANDLE ENTRY
+        if row.name <= radar_time:
+            continue
+
+        t = row.name.time()
+
+        # ENTRY WINDOW
         if not (pd.to_datetime("09:45").time() <= t <= pd.to_datetime("13:30").time()):
             continue
 
+        # ================= SCORE =================
         score = 0
 
-        if r["Low"] <= r["VWAP"] * 1.002 and r["Close"] > r["VWAP"]:
+        if row["Low"] <= row["VWAP"] * 1.002 and row["Close"] > row["VWAP"]:
             score += 1
-        if r["Close"] > r["VWAP"]:
+
+        if row["Close"] > row["VWAP"]:
             score += 1
-        if r["Close"] > p["High"]:
+
+        if row["Close"] > prev["High"]:
             score += 1
-        if r["Volume"] > p["Volume"] * 1.2:
+
+        if row["Volume"] > prev["Volume"] * 1.2:
             score += 1
 
         if score < 4:
             continue
 
-        entry = float(r["High"])
-        sl = float(p["VWAP"])
-        risk = entry - sl
+        # ================= TRADE =================
+        entry = float(row["High"])
+        sl = float(prev["VWAP"])
 
+        risk = entry - sl
         if risk <= 0:
             continue
 
@@ -166,7 +163,7 @@ def find_trade(df5, radar_time):
 
         target = entry + (risk * 2)
 
-        # ================= RESULT CHECK =================
+        # ================= RESULT =================
         result = "OPEN"
 
         for j in range(i + 1, len(df)):
@@ -184,7 +181,7 @@ def find_trade(df5, radar_time):
                 break
 
         return {
-            "time": df.index[i],
+            "time": row.name,
             "entry": round(entry, 2),
             "sl": round(sl, 2),
             "target": round(target, 2),
@@ -197,6 +194,7 @@ def find_trade(df5, radar_time):
 
 # ================= BACKTEST =================
 def scan_stock(symbol, date):
+
     df15 = to_ist(get_data(symbol, "15m"))
     df5 = to_ist(get_data(symbol, "5m"))
 
@@ -227,12 +225,14 @@ def scan_stock(symbol, date):
 
 
 def scan_all(date):
-    res = []
+    results = []
+
     for s in FNO_STOCKS:
         r = scan_stock(s, date)
         if r:
-            res.append(r)
-    return res
+            results.append(r)
+
+    return results
 
 
 # ================= FORMAT =================
@@ -265,6 +265,7 @@ def webhook():
 
     # DATE BACKTEST
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+
         send(chat_id, f"📅 SCANNING {text}")
 
         results = scan_all(text)
