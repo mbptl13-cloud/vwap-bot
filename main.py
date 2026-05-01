@@ -136,13 +136,13 @@ def find_15m_radars(df):
         vwap_val = row["VWAP"]
 
         if isinstance(vwap_val, pd.Series):
-        vwap_val = vwap_val.iloc[0]
+            vwap_val = vwap_val.iloc[0]
 
         vwap_val = float(vwap_val)
         vol_val = row["VOL_SMA20"]
 
         if isinstance(vol_val, pd.Series):
-        vol_val = vol_val.iloc[0]
+            vol_val = vol_val.iloc[0]
 
         vol_val = float(vol_val) 
             if not pd.isna(vol_val) 
