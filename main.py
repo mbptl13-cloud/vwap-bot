@@ -60,6 +60,9 @@ def get_data(symbol, interval):
         if df is None or df.empty:
             return None
 
+        if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+
         df = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
 
         df.index = pd.to_datetime(df.index)
@@ -99,13 +102,16 @@ def filter_date(df, date_str):
 # =====================================
 
 def calculate_vwap(df):
+    df = df.copy()
+
     tp = (df["High"] + df["Low"] + df["Close"]) / 3
 
     cum_vol = df["Volume"].groupby(df.index.date).cumsum()
     cum_pv = (tp * df["Volume"]).groupby(df.index.date).cumsum()
 
-    return cum_pv / cum_vol
+    vwap = cum_pv / cum_vol
 
+    return vwap.astype(float)   # 🔥 FORCE SCALAR SERIES
 # =====================================
 # 15M RADAR (STRICT LOGIC)
 # =====================================
@@ -115,7 +121,7 @@ def find_15m_radars(df):
         return []
 
     df = df.copy()
-    df["VWAP"] = calculate_vwap(df)
+    df["VWAP"] = calculate_vwap(df).values
     df["VOL_SMA20"] = df["Volume"].rolling(20).mean()
 
     radars = []
@@ -127,9 +133,20 @@ def find_15m_radars(df):
 
         row = df.iloc[i]
 
-        vwap_val = float(row["VWAP"])
-        vol_val = float(row["VOL_SMA20"]) if not pd.isna(row["VOL_SMA20"]) else 0
+        vwap_val = row["VWAP"]
 
+        if isinstance(vwap_val, pd.Series):
+        vwap_val = vwap_val.iloc[0]
+
+        vwap_val = float(vwap_val)
+        vol_val = row["VOL_SMA20"]
+
+        if isinstance(vol_val, pd.Series):
+        vol_val = vol_val.iloc[0]
+
+        vol_val = float(vol_val) 
+            if not pd.isna(vol_val) 
+            else 0
         if pd.isna(vwap_val) or pd.isna(vol_val):
             continue
 
