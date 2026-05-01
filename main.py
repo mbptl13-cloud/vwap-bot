@@ -67,7 +67,7 @@ def to_ist(df):
 
 def session_filter(df):
     try:
-        return df.between_time("09:45", "13:30")
+        return df.between_time("09:15", "15:30")
     except:
         return None
 
@@ -93,20 +93,40 @@ def calculate_vwap(df):
 # ================= STRATEGY =================
 
 def find_15m_radars(df):
+    if df is None or len(df) < 20:
+        return []
+
+    df = df.copy()
     df["VWAP"] = calculate_vwap(df)
     df["VOL_SMA20"] = df["Volume"].rolling(20).mean()
 
     radars = []
 
     for i in range(19, len(df)):
-        r = df.iloc[i]
+
+        # ✅ 👉 PASTE IT HERE
+        if df.index[i].time() < pd.to_datetime("09:45").time():
+            continue
+
+        row = df.iloc[i]
+
+        if pd.isna(row["VWAP"]) or pd.isna(row["VOL_SMA20"]):
+            continue
+
+        body = abs(row["Close"] - row["Open"]) / row["Open"]
+        rng = (row["High"] - row["Low"]) / row["Open"]
 
         if (
-            r["Close"] > r["VWAP"]
-            and r["Volume"] > 2 * r["VOL_SMA20"]
-            and r["Close"] > r["Open"]
+            row["Close"] > row["VWAP"]
+            and row["Volume"] > 500000
+            and row["Volume"] > 2 * row["VOL_SMA20"]
+            and body > 0.006
+            and rng > 0.006
+            and row["Close"] > row["Open"]
         ):
-            radars.append({"time": df.index[i] + pd.Timedelta(minutes=15)})
+            radars.append({
+                "time": df.index[i] + pd.Timedelta(minutes=15)
+            })
 
     return radars
 
