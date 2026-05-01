@@ -5,7 +5,7 @@ import pandas as pd
 import yfinance as yf
 from flask import Flask, request
 
-BOT_TOKEN = "8218143624:AAGr75U7tVRiXKES5WIJneD6MotImx66qis"
+BOT_TOKEN = "8695080537:AAFolODguF8s1z88s_57HTVModIrmGojlno"
 RENDER_URL = "https://vwap-bot-ia6r.onrender.com"
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 PORT = int(os.environ.get("PORT", 10000))
