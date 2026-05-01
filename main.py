@@ -61,7 +61,7 @@ def get_data(symbol, interval):
             return None
 
         if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
+            df.columns = df.columns.get_level_values(0)
 
         df = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
 
