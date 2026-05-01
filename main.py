@@ -96,13 +96,17 @@ def filter_date(df, date_str):
 # =====================================
 
 def calculate_vwap(df):
+    df = df.copy()
+
     tp = (df["High"] + df["Low"] + df["Close"]) / 3
 
-    return (
+    vwap = (
         (tp * df["Volume"]).groupby(df.index.date).cumsum()
         /
         df["Volume"].groupby(df.index.date).cumsum()
     )
+
+    return vwap.values   # 👈 CRITICAL FIX
 
 # =====================================
 # 15M RADAR (STRICT - YOUR LOGIC)
@@ -126,7 +130,10 @@ def find_15m_radars(df):
 
         row = df.iloc[i]
 
-        if pd.isna(row["VWAP"]) or pd.isna(row["VOL_SMA20"]):
+        vwap_val = row["VWAP"]
+        vol_val = row["VOL_SMA20"]
+
+        if pd.isna(vwap_val) or pd.isna(vol_val):
             continue
 
         body = abs(row["Close"] - row["Open"]) / row["Open"]
