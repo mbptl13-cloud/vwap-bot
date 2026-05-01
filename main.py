@@ -1,6 +1,5 @@
 import os
 import re
-import time
 import requests
 import pandas as pd
 import yfinance as yf
@@ -9,17 +8,17 @@ from flask import Flask, request
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# ================= CONFIG =================
+
 BOT_TOKEN = "8689896067:AAEuHnXG8f7orhfygCKvHoDItQmJTqzGGB4"
 RENDER_URL = "https://your-url.onrender.com"
 
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 PORT = int(os.environ.get("PORT", 10000))
 
+MAX_THREADS = 10
+
 app = Flask(__name__)
-
-# ================= CONFIG =================
-
-MAX_THREADS = 10   # speed control
 
 FNO_STOCKS = [
     "ADANIGREEN.NS","BHEL.NS","RELIANCE.NS","TCS.NS","TATAPOWER.NS"
@@ -29,9 +28,11 @@ FNO_STOCKS = [
 
 def send(chat_id, text):
     try:
-        requests.post(f"{BASE_URL}/sendMessage",
-                      json={"chat_id": chat_id, "text": text},
-                      timeout=10)
+        requests.post(
+            f"{BASE_URL}/sendMessage",
+            json={"chat_id": chat_id, "text": text},
+            timeout=10
+        )
     except:
         pass
 
@@ -201,30 +202,29 @@ def scan_stock(sym, date):
     df5 = to_ist(get_data(sym, "5m"))
 
     if df15 is None:
-        return None
+        return {"symbol": sym, "error": "NO DATA"}
 
     df15 = filter_date(df15, date)
     if df15 is None:
-        return None
+        return {"symbol": sym, "error": "NO DATA"}
 
     radars = find_15m(df15)
 
     if not radars:
-        return None
+        return {"symbol": sym, "radar": None, "trade": None}
 
     for r in radars:
         trade = None
 
         if df5 is not None:
             df5d = filter_date(df5, date)
-
             if df5d is not None:
                 trade = find_5m(df5d, r["time"])
 
         if trade:
             return {"symbol": sym, "radar": r, "trade": trade}
 
-    return None
+    return {"symbol": sym, "radar": radars[0], "trade": None}
 
 
 def scan_all(date):
@@ -259,13 +259,23 @@ def run_range(sym, d1, d2):
 
 def fmt(r):
     msg = f"📊 {r['symbol']}\n"
+
+    if "error" in r:
+        return msg + "NO DATA"
+
+    if r["radar"] is None:
+        return msg + "NO RADAR"
+
     msg += f"15M: {r['radar']['time'].strftime('%Y-%m-%d %H:%M')}\n"
 
-    t = r["trade"]
-    msg += f"5M: {t['time'].strftime('%Y-%m-%d %H:%M')}\n"
-    msg += f"Score: {t['score']}\n"
-    msg += f"Entry: {t['entry']} SL: {t['sl']} TG: {t['target']}\n"
-    msg += f"Result: {t['result']}"
+    if r["trade"]:
+        t = r["trade"]
+        msg += f"5M: {t['time'].strftime('%Y-%m-%d %H:%M')}\n"
+        msg += f"Score: {t['score']}\n"
+        msg += f"Entry: {t['entry']} SL: {t['sl']} TG: {t['target']}\n"
+        msg += f"Result: {t['result']}"
+    else:
+        msg += "NO 5M SETUP"
 
     return msg
 
@@ -289,10 +299,6 @@ def webhook():
 
         results = scan_all(text)
 
-        if not results:
-            send(chat_id, "No setups found")
-            return "ok"
-
         for r in results:
             send(chat_id, fmt(r))
 
@@ -302,12 +308,7 @@ def webhook():
     if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2}", text):
         sym, d = text.split()
         r = scan_stock(sym + ".NS", d)
-
-        if r:
-            send(chat_id, fmt(r))
-        else:
-            send(chat_id, "No setup")
-
+        send(chat_id, fmt(r))
         return "ok"
 
     # RANGE
@@ -327,8 +328,10 @@ def webhook():
 
         for s in FNO_STOCKS:
             r = scan_stock(s, d)
-            if r:
+            if r["radar"]:
                 send(chat_id, f"{s} → {r['radar']['time'].strftime('%H:%M')}")
+            else:
+                send(chat_id, f"{s} → NO RADAR")
 
         return "ok"
 
