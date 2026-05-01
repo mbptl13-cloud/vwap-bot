@@ -100,13 +100,12 @@ def calculate_vwap(df):
 
     tp = (df["High"] + df["Low"] + df["Close"]) / 3
 
-    vwap = (
-        (tp * df["Volume"]).groupby(df.index.date).cumsum()
-        /
-        df["Volume"].groupby(df.index.date).cumsum()
-    )
+    cum_vol = df["Volume"].groupby(df.index.date).cumsum()
+    cum_pv = (tp * df["Volume"]).groupby(df.index.date).cumsum()
 
-    return vwap.values   # 👈 CRITICAL FIX
+    vwap = cum_pv / cum_vol
+
+    return vwap
 
 # =====================================
 # 15M RADAR (STRICT - YOUR LOGIC)
@@ -133,7 +132,7 @@ def find_15m_radars(df):
         vwap_val = row["VWAP"]
         vol_val = row["VOL_SMA20"]
 
-        if pd.isna(vwap_val) or pd.isna(vol_val):
+        if pd.isna(float(vwap_val)) or pd.isna(float(vol_val)):
             continue
 
         body = abs(row["Close"] - row["Open"]) / row["Open"]
