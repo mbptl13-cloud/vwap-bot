@@ -65,13 +65,6 @@ def to_ist(df):
     return df
 
 
-def session_filter(df):
-    try:
-        return df.between_time("09:15", "15:30")
-    except:
-        return None
-
-
 def filter_date(df, date):
     d = pd.to_datetime(date).date()
     return df[df.index.date == d]
@@ -182,6 +175,16 @@ def find_5m_trade(df, radar_time):
         }
 
     return None
+
+def session_filter_full(df):
+    if df is None:
+        return None
+
+    try:
+        df = df.between_time("09:15", "15:30")
+        return df if not df.empty else None
+    except:
+        return None
 
 
 def scan_stock(symbol, date):
