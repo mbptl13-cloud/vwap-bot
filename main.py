@@ -110,8 +110,8 @@ def find_15m_radars(df):
         rng = (row["High"] - row["Low"]) / row["Open"]
 
         if (
-            row["Close"] > row["VWAP"]
-            and row["Volume"] > 500000
+            
+            row["Volume"] > 500000
             and row["Volume"] > 2 * row["VOL_SMA20"]
             and body > 0.006
             and rng > 0.006
