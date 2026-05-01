@@ -1,6 +1,7 @@
 import os
 import re
 import time
+import threading
 import requests
 import pandas as pd
 import yfinance as yf
@@ -19,18 +20,9 @@ FNO_STOCKS = ["ADANIGREEN.NS", "BHEL.NS", "RELIANCE.NS", "TCS.NS"]
 
 # ================= CONTROL =================
 
+RUNNING = {}
+STOP_FLAG = {}
 LAST_REQUEST = {}
-ACTIVE_TASKS = {}
-
-def is_duplicate(chat_id, text):
-    key = f"{chat_id}:{text}"
-    now = time.time()
-
-    if key in LAST_REQUEST and now - LAST_REQUEST[key] < 20:
-        return True
-
-    LAST_REQUEST[key] = now
-    return False
 
 # ================= TELEGRAM =================
 
@@ -41,6 +33,14 @@ def send(chat_id, text):
                       timeout=20)
     except:
         pass
+
+def is_duplicate(chat_id, text):
+    key = f"{chat_id}:{text}"
+    now = time.time()
+    if key in LAST_REQUEST and now - LAST_REQUEST[key] < 10:
+        return True
+    LAST_REQUEST[key] = now
+    return False
 
 # ================= DATA =================
 
@@ -202,6 +202,9 @@ def scan_stock(sym, date):
 # ================= FORMAT =================
 
 def fmt(r):
+    if r is None:
+        return "No data"
+
     if isinstance(r["radar"], str):
         return f"{r['symbol']} → {r['radar']}"
 
@@ -214,6 +217,27 @@ def fmt(r):
         msg += "5M: NO SETUP"
 
     return msg
+
+# ================= THREAD WORKERS =================
+
+def range_worker(chat_id, sym, d1, d2):
+    STOP_FLAG[chat_id] = False
+    send(chat_id, f"📊 RANGE {sym}")
+
+    for i, d in enumerate(pd.date_range(d1, d2)):
+
+        if STOP_FLAG.get(chat_id):
+            send(chat_id, "🛑 Scan stopped")
+            return
+
+        if i > 20:
+            send(chat_id, "⚠️ Limit reached")
+            return
+
+        r = scan_stock(sym + ".NS", str(d.date()))
+        send(chat_id, fmt(r))
+
+        time.sleep(0.3)
 
 # ================= WEBHOOK =================
 
@@ -232,8 +256,8 @@ def webhook():
 
     # STOP
     if text == "STOP":
-        ACTIVE_TASKS[chat_id] = False
-        send(chat_id, "🛑 Stopped")
+        STOP_FLAG[chat_id] = True
+        send(chat_id, "🛑 Stopping...")
         return "ok"
 
     # START
@@ -247,7 +271,7 @@ STOCK → BHEL 2026-04-27
 RANGE → ADANIGREEN 2026-04-01 TO 2026-04-10
 RADAR → 2026-04-27 RADAR
 
-Send STOP to cancel running scan
+Send STOP anytime to cancel
 """)
         return "ok"
 
@@ -262,23 +286,14 @@ Send STOP to cancel running scan
                 send(chat_id, f"{s} → {r['radar']}")
         return "ok"
 
-    # RANGE
+    # RANGE (THREAD)
     if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2} TO \d{4}-\d{2}-\d{2}", text):
         sym, d1, _, d2 = text.split()
-        ACTIVE_TASKS[chat_id] = True
 
-        send(chat_id, f"📊 RANGE {sym}")
+        STOP_FLAG[chat_id] = True  # stop previous
 
-        for i, d in enumerate(pd.date_range(d1, d2)):
-            if not ACTIVE_TASKS.get(chat_id):
-                break
-
-            if i > 20:
-                send(chat_id, "⚠️ Limit reached")
-                break
-
-            r = scan_stock(sym + ".NS", str(d.date()))
-            send(chat_id, fmt(r))
+        t = threading.Thread(target=range_worker, args=(chat_id, sym, d1, d2))
+        t.start()
 
         return "ok"
 
