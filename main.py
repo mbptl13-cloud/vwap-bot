@@ -14,6 +14,9 @@ RENDER_URL = "https://vwap-bot-ia6r.onrender.com"
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 PORT = int(os.environ.get("PORT", 10000))
 
+LIVE_SCAN_DELAY = 120   # seconds
+RADAR_SCAN_DELAY = 120
+
 app = Flask(__name__)
 
 LAST_REQUEST = {}
@@ -252,6 +255,44 @@ def send(chat_id, text):
     except Exception as e:
         print("Send Error:", e)
 
+import threading
+
+def live_runner(chat_id):
+    send(chat_id, "📡 LIVE SCAN STARTED")
+
+    while True:
+        try:
+            results = scan_all()
+
+            if results:
+                for r in results:
+                    if r["trade"]:
+                        send(chat_id, format_result(r))
+
+            time.sleep(LIVE_SCAN_DELAY)
+
+        except Exception as e:
+            print("LIVE ERROR:", e)
+            time.sleep(10)
+
+
+def radar_runner(chat_id):
+    send(chat_id, "📊 RADAR LIVE STARTED")
+
+    while True:
+        try:
+            results = scan_all()
+
+            if results:
+                for r in results:
+                    send(chat_id, f"{r['symbol']} → {r['radar']['time'].strftime('%H:%M')}")
+
+            time.sleep(RADAR_SCAN_DELAY)
+
+        except Exception as e:
+            print("RADAR ERROR:", e)
+            time.sleep(10)
+
 
 def set_webhook():
     try:
@@ -448,19 +489,13 @@ def webhook():
     today=datetime.now().strftime("%Y-%m-%d")
 
     # LIVE
-    if text=="LIVE":
-        send(chat_id,"📡 LIVE SCAN")
-        for r in scan_all(today):
-            send(chat_id,fmt(r))
+    if text == "LIVE":
+    threading.Thread(target=live_runner, args=(chat_id,)).start()
         return "ok"
 
     # RADAR LIVE
-    if text=="RADAR LIVE":
-        send(chat_id,"📡 RADAR LIVE")
-        for s in FNO_STOCKS:
-            r=scan_stock(s,today)
-            if r:
-                send(chat_id,f"{s} → {r['radar']['time'].strftime('%H:%M')}")
+    if text == "RADAR LIVE":
+    threading.Thread(target=radar_runner, args=(chat_id,)).start()
         return "ok"
 
     # DATE RADAR
