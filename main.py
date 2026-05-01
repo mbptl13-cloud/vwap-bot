@@ -1,9 +1,12 @@
 import os
 import re
+import time
 import requests
 import pandas as pd
 import yfinance as yf
 from flask import Flask, request
+
+# ================= CONFIG =================
 
 BOT_TOKEN = "8695080537:AAFolODguF8s1z88s_57HTVModIrmGojlno"
 RENDER_URL = "https://vwap-bot-ia6r.onrender.com"
@@ -14,12 +17,28 @@ app = Flask(__name__)
 
 FNO_STOCKS = ["ADANIGREEN.NS", "BHEL.NS", "RELIANCE.NS", "TCS.NS"]
 
+# ================= CONTROL =================
+
+LAST_REQUEST = {}
+ACTIVE_TASKS = {}
+
+def is_duplicate(chat_id, text):
+    key = f"{chat_id}:{text}"
+    now = time.time()
+
+    if key in LAST_REQUEST and now - LAST_REQUEST[key] < 20:
+        return True
+
+    LAST_REQUEST[key] = now
+    return False
+
 # ================= TELEGRAM =================
 
 def send(chat_id, text):
     try:
         requests.post(f"{BASE_URL}/sendMessage",
-                      json={"chat_id": chat_id, "text": text})
+                      json={"chat_id": chat_id, "text": text},
+                      timeout=20)
     except:
         pass
 
@@ -43,7 +62,7 @@ def get_data(symbol, interval):
 
     return df
 
-# ================= VWAP (DAILY RESET) =================
+# ================= VWAP =================
 
 def add_vwap(df):
     tp = (df["High"] + df["Low"] + df["Close"]) / 3
@@ -55,7 +74,7 @@ def add_vwap(df):
     df["VWAP"] = df["CUM_TPV"] / df["CUM_VOL"]
     return df
 
-# ================= 15M RADAR =================
+# ================= 15M =================
 
 def find_15m(df):
     df = add_vwap(df.copy())
@@ -73,33 +92,25 @@ def find_15m(df):
         if pd.isna(r["VWAP"]) or pd.isna(r["VOL_SMA20"]):
             continue
 
-        volume_cond = r["Volume"] > 500000
-        turnover_cond = (r["Close"] * r["Volume"]) > 150000000
-
-        range_pct = ((r["High"] - r["Low"]) / r["Open"]) * 100
-        body_pct = (abs(r["Close"] - r["Open"]) / r["Open"]) * 100
-
-        range_cond = range_pct > 1
-        body_cond = body_pct > 0.6
-
-        vwap_cond = r["Close"] > r["VWAP"]
-        vol_spike = r["Volume"] > (2 * r["VOL_SMA20"])
-        bullish = r["Close"] > r["Open"]
-
-        if all([volume_cond, turnover_cond, range_cond,
-                body_cond, vwap_cond, vol_spike, bullish]):
-            
+        if (
+            r["Volume"] > 500000 and
+            (r["Close"] * r["Volume"]) > 150000000 and
+            ((r["High"] - r["Low"]) / r["Open"]) * 100 > 1 and
+            (abs(r["Close"] - r["Open"]) / r["Open"]) * 100 > 0.6 and
+            r["Close"] > r["VWAP"] and
+            r["Volume"] > 2 * r["VOL_SMA20"] and
+            r["Close"] > r["Open"]
+        ):
             radars.append(r.name + pd.Timedelta(minutes=15))
 
     return radars
 
-# ================= 5M TRADE =================
+# ================= 5M =================
 
 def find_5m(df, radar_time):
     df = add_vwap(df.copy())
-
-    # only after radar
     df = df[df.index > radar_time]
+
     if df.empty:
         return None
 
@@ -112,7 +123,6 @@ def find_5m(df, radar_time):
             continue
 
         score = 0
-
         if r["Low"] <= r["VWAP"] * 1.003: score += 1
         if r["Close"] > p["High"]: score += 1
         if r["Close"] > r["Open"]: score += 1
@@ -135,10 +145,9 @@ def find_5m(df, radar_time):
         if not (0.003 <= risk/entry <= 0.02):
             continue
 
-        target = round(entry + risk*2, 2)
+        target = round(entry + risk * 2, 2)
 
         result = "OPEN"
-
         for j in range(i+1, len(df)):
             nxt = df.iloc[j]
 
@@ -158,8 +167,7 @@ def find_5m(df, radar_time):
             "entry": entry,
             "sl": sl,
             "target": target,
-            "result": result,
-            "score": f"{score}/5"
+            "result": result
         }
 
     return None
@@ -191,15 +199,6 @@ def scan_stock(sym, date):
 
     return {"symbol": sym, "radar": radar, "trade": trade}
 
-# ================= RANGE =================
-
-def run_range(sym, d1, d2):
-    res = []
-    for d in pd.date_range(d1, d2):
-        r = scan_stock(sym, str(d.date()))
-        res.append(r)
-    return res
-
 # ================= FORMAT =================
 
 def fmt(r):
@@ -226,58 +225,77 @@ def webhook():
         return "ok"
 
     chat_id = data["message"]["chat"]["id"]
-    text = data["message"].get("text","").upper()
+    text = data["message"].get("text", "").strip().upper()
 
+    if is_duplicate(chat_id, text):
+        return "ok"
+
+    # STOP
+    if text == "STOP":
+        ACTIVE_TASKS[chat_id] = False
+        send(chat_id, "🛑 Stopped")
+        return "ok"
+
+    # START
     if text == "/START":
-    send(chat_id,
+        send(chat_id,
 """🤖 FNO BACKTEST BOT
 
-Available Commands:
+Commands:
+DATE → 2026-04-27
+STOCK → BHEL 2026-04-27
+RANGE → ADANIGREEN 2026-04-01 TO 2026-04-10
+RADAR → 2026-04-27 RADAR
 
-1️⃣ DATE SCAN
-2026-04-27
-
-2️⃣ STOCK DATE
-BHEL 2026-04-27
-
-3️⃣ RANGE
-ADANIGREEN 2026-04-01 TO 2026-04-10
-
-4️⃣ RADAR
-2026-04-27 RADAR
+Send STOP to cancel running scan
 """)
-        return "ok"
-
-    # RANGE
-    if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2} TO \d{4}-\d{2}-\d{2}", text):
-        sym,d1,_,d2 = text.split()
-        send(chat_id, f"📊 RANGE {sym}")
-        for r in run_range(sym+".NS", d1, d2):
-            send(chat_id, fmt(r))
-        return "ok"
-
-    # SYMBOL DATE
-    if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2}", text):
-        sym,d = text.split()
-        send(chat_id, fmt(scan_stock(sym+".NS", d)))
-        return "ok"
-
-    # DATE
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
-        for s in FNO_STOCKS:
-            send(chat_id, fmt(scan_stock(s, text)))
         return "ok"
 
     # RADAR
     if re.fullmatch(r"\d{4}-\d{2}-\d{2} RADAR", text):
         d = text.split()[0]
         send(chat_id, f"📡 RADAR {d}")
+
         for s in FNO_STOCKS:
             r = scan_stock(s, d)
             if r and not isinstance(r["radar"], str):
                 send(chat_id, f"{s} → {r['radar']}")
         return "ok"
 
+    # RANGE
+    if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2} TO \d{4}-\d{2}-\d{2}", text):
+        sym, d1, _, d2 = text.split()
+        ACTIVE_TASKS[chat_id] = True
+
+        send(chat_id, f"📊 RANGE {sym}")
+
+        for i, d in enumerate(pd.date_range(d1, d2)):
+            if not ACTIVE_TASKS.get(chat_id):
+                return "ok"
+
+            if i > 20:
+                send(chat_id, "⚠️ Limit reached")
+                break
+
+            r = scan_stock(sym + ".NS", str(d.date()))
+            send(chat_id, fmt(r))
+
+        return "ok"
+
+    # STOCK DATE
+    if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2}", text):
+        sym, d = text.split()
+        send(chat_id, fmt(scan_stock(sym + ".NS", d)))
+        return "ok"
+
+    # DATE
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        send(chat_id, f"📅 SCANNING {text}")
+        for s in FNO_STOCKS:
+            send(chat_id, fmt(scan_stock(s, text)))
+        return "ok"
+
+    send(chat_id, "❌ Invalid command")
     return "ok"
 
 # ================= RUN =================
