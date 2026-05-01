@@ -228,6 +228,26 @@ def webhook():
     chat_id = data["message"]["chat"]["id"]
     text = data["message"].get("text","").upper()
 
+    if text == "/START":
+    send(chat_id,
+"""🤖 FNO BACKTEST BOT
+
+Available Commands:
+
+1️⃣ DATE SCAN
+2026-04-27
+
+2️⃣ STOCK DATE
+BHEL 2026-04-27
+
+3️⃣ RANGE
+ADANIGREEN 2026-04-01 TO 2026-04-10
+
+4️⃣ RADAR
+2026-04-27 RADAR
+""")
+        return "ok"
+
     # RANGE
     if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2} TO \d{4}-\d{2}-\d{2}", text):
         sym,d1,_,d2 = text.split()
