@@ -1,6 +1,5 @@
 import os
 import re
-import time
 import requests
 import pandas as pd
 import yfinance as yf
@@ -11,8 +10,8 @@ from flask import Flask, request
 # CONFIG
 # =====================================
 
-BOT_TOKEN = "8695080537:AAFolODguF8s1z88s_57HTVModIrmGojlno"
-RENDER_URL = "https://vwap-bot-ia6r.onrender.com"
+BOT_TOKEN = "token"
+RENDER_URL = "https://your-app.onrender.com"
 
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 PORT = int(os.environ.get("PORT", 10000))
@@ -20,19 +19,24 @@ PORT = int(os.environ.get("PORT", 10000))
 app = Flask(__name__)
 
 # =====================================
-# WATCHLIST
+# TELEGRAM DEDUP (FIXED)
 # =====================================
 
-FNO_STOCKS = [
-    "ADANIGREEN.NS",
-    "BHEL.NS",
-    "RELIANCE.NS",
-    "TATAPOWER.NS",
-    "SBIN.NS"
-]
+PROCESSED_UPDATES = set()
+
+def is_duplicate(update_id):
+    if update_id in PROCESSED_UPDATES:
+        return True
+
+    PROCESSED_UPDATES.add(update_id)
+
+    if len(PROCESSED_UPDATES) > 1000:
+        PROCESSED_UPDATES.clear()
+
+    return False
 
 # =====================================
-# TELEGRAM
+# SEND MESSAGE
 # =====================================
 
 def send(chat_id, text):
@@ -46,7 +50,7 @@ def send(chat_id, text):
         print("Send Error:", e)
 
 # =====================================
-# DATA PIPELINE (FIXED)
+# DATA FETCH
 # =====================================
 
 def get_data(symbol, interval):
@@ -58,57 +62,52 @@ def get_data(symbol, interval):
 
         df = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
 
-        # Convert to IST properly
         df.index = pd.to_datetime(df.index)
+
         if df.index.tz is None:
             df.index = df.index.tz_localize("UTC")
 
         df.index = df.index.tz_convert("Asia/Kolkata")
 
-        # Keep only market session
         df = df.between_time("09:15", "15:30")
 
         return df if not df.empty else None
 
     except Exception as e:
-        print("Download Error:", symbol, e)
+        print("Download Error:", e)
         return None
 
 # =====================================
-# DATE FILTER (NO BUG)
+# DATE FILTER (FIXED)
 # =====================================
 
 def filter_date(df, date_str):
     if df is None:
         return None
 
+    df = df.copy()
     d = pd.to_datetime(date_str).date()
 
-    # Remove timezone safely
-    idx = df.index.tz_localize(None)
-
-    df = df[idx.date == d]
+    df["temp_date"] = df.index.date
+    df = df[df["temp_date"] == d]
+    df = df.drop(columns=["temp_date"])
 
     return df if not df.empty else None
 
 # =====================================
-# VWAP (CORRECT)
+# VWAP (TRADINGVIEW STYLE SAFE)
 # =====================================
 
 def calculate_vwap(df):
-    df = df.copy()
-
     tp = (df["High"] + df["Low"] + df["Close"]) / 3
 
     cum_vol = df["Volume"].groupby(df.index.date).cumsum()
     cum_pv = (tp * df["Volume"]).groupby(df.index.date).cumsum()
 
-    vwap = cum_pv / cum_vol
-
-    return vwap
+    return cum_pv / cum_vol
 
 # =====================================
-# 15M RADAR (STRICT - YOUR LOGIC)
+# 15M RADAR (STRICT LOGIC)
 # =====================================
 
 def find_15m_radars(df):
@@ -123,25 +122,24 @@ def find_15m_radars(df):
 
     for i in range(19, len(df)):
 
-        # Skip before 9:45
         if df.index[i].time() < pd.to_datetime("09:45").time():
             continue
 
         row = df.iloc[i]
 
-        vwap_val = row["VWAP"]
-        vol_val = row["VOL_SMA20"]
+        vwap_val = float(row["VWAP"])
+        vol_val = float(row["VOL_SMA20"]) if not pd.isna(row["VOL_SMA20"]) else 0
 
-        if pd.isna(float(vwap_val)) or pd.isna(float(vol_val)):
+        if pd.isna(vwap_val) or pd.isna(vol_val):
             continue
 
         body = abs(row["Close"] - row["Open"]) / row["Open"]
         rng = (row["High"] - row["Low"]) / row["Open"]
 
         if (
-            row["Close"] > row["VWAP"]
+            row["Close"] > vwap_val
             and row["Volume"] > 500000
-            and row["Volume"] > 2 * row["VOL_SMA20"]
+            and row["Volume"] > 2 * vol_val
             and body > 0.006
             and rng > 0.006
             and row["Close"] > row["Open"]
@@ -170,10 +168,8 @@ def find_5m_trade(df5, radar_time):
         row = df.iloc[i]
         prev = df.iloc[i - 1]
 
-        if pd.isna(prev["VWAP"]):
-            continue
-
         t = row.name.time()
+
         if not (pd.to_datetime("09:45").time() <= t <= pd.to_datetime("13:30").time()):
             continue
 
@@ -253,17 +249,13 @@ def scan_stock(symbol, date):
         return None
 
     for r in radars:
-        trade = None
-
-        if df5 is not None:
-            trade = find_5m_trade(df5, r["time"])
-
+        trade = find_5m_trade(df5, r["time"])
         return {"symbol": symbol, "radar": r, "trade": trade}
 
     return None
 
 # =====================================
-# FORMAT
+# FORMAT OUTPUT
 # =====================================
 
 def format_result(r):
@@ -288,6 +280,11 @@ def format_result(r):
 def webhook():
     data = request.get_json(force=True)
 
+    update_id = data.get("update_id")
+
+    if update_id and is_duplicate(update_id):
+        return "ok"
+
     if "message" not in data:
         return "ok"
 
@@ -295,7 +292,6 @@ def webhook():
     chat_id = msg["chat"]["id"]
     text = msg.get("text", "").strip().upper()
 
-    # Single stock
     if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2}", text):
         sym, date = text.split()
         symbol = sym + ".NS"
@@ -311,27 +307,12 @@ def webhook():
         send(chat_id, format_result(result))
         return "ok"
 
-    # Full watchlist
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
-        date = text
-        send(chat_id, f"📊 SCANNING ALL FOR {date}")
-
-        found = False
-
-        for symbol in FNO_STOCKS:
-            result = scan_stock(symbol, date)
-
-            if result:
-                send(chat_id, format_result(result))
-                found = True
-
-        if not found:
-            send(chat_id, "❌ No setups in watchlist")
-
-        return "ok"
-
     send(chat_id, "Command OK")
     return "ok"
+
+# =====================================
+# RUN
+# =====================================
 
 @app.route("/")
 def home():
