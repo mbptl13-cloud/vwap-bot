@@ -185,22 +185,39 @@ def find_5m_trade(df, radar_time):
 
 
 def scan_stock(symbol, date):
-    df15 = session_filter(to_ist(get_data(symbol, "15m")))
-    df5 = to_ist(get_data(symbol, "5m"))
+    # ===== 15M =====
+    df15 = get_data(symbol, "15m")
+    df15 = to_ist(df15)
+    df15 = session_filter_full(df15)
 
+    if df15 is None:
+        return None
+
+    # ✅ VWAP BEFORE ANY FILTER
+    df15["VWAP"] = calculate_vwap(df15)
+
+    # ===== 5M =====
+    df5 = get_data(symbol, "5m")
+    df5 = to_ist(df5)
+    df5 = session_filter_full(df5)
+
+    if df5 is not None:
+        df5["VWAP"] = calculate_vwap(df5)
+
+    # ===== DATE FILTER AFTER VWAP =====
+    df15 = filter_date(df15, date)
     if df15 is None:
         return None
 
     radars = find_15m_radars(df15)
 
     for r in radars:
-        if r["time"].date() != pd.to_datetime(date).date():
-            continue
-
         trade = None
+
         if df5 is not None:
             temp5 = filter_date(df5, date)
-            if not temp5.empty:
+
+            if temp5 is not None:
                 trade = find_5m_trade(temp5, r["time"])
 
         return {"symbol": symbol, "radar": r, "trade": trade}
