@@ -12,7 +12,7 @@ from flask import Flask, request
 # =====================================
 
 BOT_TOKEN = "8695080537:AAFolODguF8s1z88s_57HTVModIrmGojlno"
-RENDER_URL = "https://your-render-url.onrender.com"
+RENDER_URL = "https://vwap-bot-ia6r.onrender.com"
 
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 PORT = int(os.environ.get("PORT", 10000))
@@ -20,21 +20,16 @@ PORT = int(os.environ.get("PORT", 10000))
 app = Flask(__name__)
 
 # =====================================
-# ANTI DUPLICATE
+# WATCHLIST
 # =====================================
 
-LAST_REQUEST = {}
-
-def is_duplicate(chat_id, text):
-    key = f"{chat_id}:{text}"
-    now = time.time()
-
-    if key in LAST_REQUEST:
-        if now - LAST_REQUEST[key] < 5:
-            return True
-
-    LAST_REQUEST[key] = now
-    return False
+FNO_STOCKS = [
+    "ADANIGREEN.NS",
+    "BHEL.NS",
+    "RELIANCE.NS",
+    "TATAPOWER.NS",
+    "SBIN.NS"
+]
 
 # =====================================
 # TELEGRAM
@@ -51,7 +46,7 @@ def send(chat_id, text):
         print("Send Error:", e)
 
 # =====================================
-# DATA
+# DATA PIPELINE (FIXED)
 # =====================================
 
 def get_data(symbol, interval):
@@ -61,47 +56,38 @@ def get_data(symbol, interval):
         if df is None or df.empty:
             return None
 
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = [col[0] for col in df.columns]
-
         df = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
+
+        # Convert to IST properly
+        df.index = pd.to_datetime(df.index)
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("UTC")
+
+        df.index = df.index.tz_convert("Asia/Kolkata")
+
+        # Keep only market session
+        df = df.between_time("09:15", "15:30")
+
         return df if not df.empty else None
 
     except Exception as e:
         print("Download Error:", symbol, e)
         return None
 
-
-def to_ist(df):
-    if df is None:
-        return None
-
-    df = df.copy()
-    df.index = pd.to_datetime(df.index)
-
-    if df.index.tz is None:
-        df.index = df.index.tz_localize("UTC")
-
-    df.index = df.index.tz_convert("Asia/Kolkata")
-    return df
-
-
-def session_filter(df):
-    if df is None:
-        return None
-    try:
-        df = df.between_time("09:15", "15:30")
-        return df if not df.empty else None
-    except:
-        return None
-
+# =====================================
+# DATE FILTER (NO BUG)
+# =====================================
 
 def filter_date(df, date_str):
     if df is None:
         return None
 
     d = pd.to_datetime(date_str).date()
-    df = df[df.index.date == d]
+
+    # Remove timezone safely
+    idx = df.index.tz_localize(None)
+
+    df = df[idx.date == d]
 
     return df if not df.empty else None
 
@@ -110,20 +96,16 @@ def filter_date(df, date_str):
 # =====================================
 
 def calculate_vwap(df):
-    df = df.copy()
-
     tp = (df["High"] + df["Low"] + df["Close"]) / 3
 
-    df["VWAP"] = (
+    return (
         (tp * df["Volume"]).groupby(df.index.date).cumsum()
         /
         df["Volume"].groupby(df.index.date).cumsum()
     )
 
-    return df["VWAP"]
-
 # =====================================
-# 15M RADAR (STRICT)
+# 15M RADAR (STRICT - YOUR LOGIC)
 # =====================================
 
 def find_15m_radars(df):
@@ -246,18 +228,16 @@ def find_5m_trade(df5, radar_time):
     return None
 
 # =====================================
-# SCAN (FIXED PIPELINE)
+# SCAN ENGINE
 # =====================================
 
 def scan_stock(symbol, date):
-    df15 = session_filter(to_ist(get_data(symbol, "15m")))
-    df5 = session_filter(to_ist(get_data(symbol, "5m")))
+    df15 = get_data(symbol, "15m")
+    df5 = get_data(symbol, "5m")
 
-    if df15 is None:
-        return None
-
-    # ✅ FIRST FILTER DATE
     df15 = filter_date(df15, date)
+    df5 = filter_date(df5, date)
+
     if df15 is None:
         return None
 
@@ -270,9 +250,7 @@ def scan_stock(symbol, date):
         trade = None
 
         if df5 is not None:
-            temp5 = filter_date(df5, date)
-            if temp5 is not None:
-                trade = find_5m_trade(temp5, r["time"])
+            trade = find_5m_trade(df5, r["time"])
 
         return {"symbol": symbol, "radar": r, "trade": trade}
 
@@ -311,9 +289,7 @@ def webhook():
     chat_id = msg["chat"]["id"]
     text = msg.get("text", "").strip().upper()
 
-    if is_duplicate(chat_id, text):
-        return "ok"
-
+    # Single stock
     if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2}", text):
         sym, date = text.split()
         symbol = sym + ".NS"
@@ -327,6 +303,25 @@ def webhook():
             return "ok"
 
         send(chat_id, format_result(result))
+        return "ok"
+
+    # Full watchlist
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        date = text
+        send(chat_id, f"📊 SCANNING ALL FOR {date}")
+
+        found = False
+
+        for symbol in FNO_STOCKS:
+            result = scan_stock(symbol, date)
+
+            if result:
+                send(chat_id, format_result(result))
+                found = True
+
+        if not found:
+            send(chat_id, "❌ No setups in watchlist")
+
         return "ok"
 
     send(chat_id, "Command OK")
