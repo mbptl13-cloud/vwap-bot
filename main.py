@@ -78,8 +78,16 @@ def filter_date(df, date):
 
 
 def calculate_vwap(df):
+    df = df.copy()
     tp = (df["High"] + df["Low"] + df["Close"]) / 3
-    return (tp * df["Volume"]).cumsum() / df["Volume"].cumsum()
+
+    df["VWAP"] = (
+        (tp * df["Volume"]).groupby(df.index.date).cumsum()
+        /
+        df["Volume"].groupby(df.index.date).cumsum()
+    )
+
+    return df["VWAP"]
 
 
 # ================= STRATEGY =================
