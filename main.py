@@ -1,6 +1,5 @@
 import os
 import re
-import time
 import requests
 import pandas as pd
 import yfinance as yf
@@ -32,6 +31,7 @@ def send(chat_id, text):
 # ================= DATA =================
 def get_data(symbol, interval):
     df = yf.download(symbol, interval=interval, period="30d", progress=False)
+
     if df is None or df.empty:
         return None
 
@@ -58,31 +58,31 @@ def to_ist(df):
     return df
 
 
+# ================= SESSION FILTER =================
 def session_filter(df):
     return df.between_time("09:45", "15:30")
 
 
-def filter_date(df, d):
-    d = pd.to_datetime(d).date()
+def filter_date(df, date):
+    d = pd.to_datetime(date).date()
     df = df[df.index.date == d]
     return df if not df.empty else None
 
 
-# ================= FIXED VWAP (SESSION RESET) =================
+# ================= FIXED VWAP (SESSION ONLY) =================
 def vwap_session(df):
     df = df.copy()
-
     df["date"] = df.index.date
+
     tp = (df["High"] + df["Low"] + df["Close"]) / 3
 
-    vwap_list = []
+    vwap_all = []
 
-    for d, g in df.groupby("date"):
-        cum_vol = g["Volume"].cumsum()
-        vwap = (tp[g.index] * g["Volume"]).cumsum() / cum_vol
-        vwap_list.append(vwap)
+    for _, g in df.groupby("date"):
+        vwap = (tp[g.index] * g["Volume"]).cumsum() / g["Volume"].cumsum()
+        vwap_all.append(vwap)
 
-    df["VWAP"] = pd.concat(vwap_list).sort_index()
+    df["VWAP"] = pd.concat(vwap_all).sort_index()
     return df
 
 
@@ -96,6 +96,12 @@ def find_radar(df):
     for i in range(20, len(df)):
         r = df.iloc[i]
 
+        t = r.name.time()
+
+        # ✅ RADAR TIME STRICT FILTER
+        if not (pd.to_datetime("09:45").time() <= t <= pd.to_datetime("13:30").time()):
+            continue
+
         if pd.isna(r["VWAP"]) or pd.isna(r["VOL_SMA"]):
             continue
 
@@ -107,28 +113,30 @@ def find_radar(df):
             and r["Volume"] > 2 * r["VOL_SMA"]
             and body > 0.006
         ):
-            radars.append(df.index[i])
+            radars.append(r.name)
 
     return radars
 
 
 # ================= 5M TRADE =================
 def find_trade(df5, radar_time):
-    df = df5[df5.index > radar_time].copy()
+
+    # ✅ SAME DAY LOCK (CRITICAL FIX)
+    df = df5[df5.index.date == radar_time.date()]
+    df = df[df.index > radar_time].copy()
+
     if df.empty:
         return None
 
     df = vwap_session(df)
 
-    entry_found = False
-
     for i in range(1, len(df)):
         r = df.iloc[i]
-        p = df.iloc[i-1]
+        p = df.iloc[i - 1]
 
         t = r.name.time()
 
-        # ENTRY WINDOW FIX
+        # ✅ ENTRY WINDOW STRICT
         if not (pd.to_datetime("09:45").time() <= t <= pd.to_datetime("13:30").time()):
             continue
 
@@ -158,7 +166,7 @@ def find_trade(df5, radar_time):
 
         target = entry + (risk * 2)
 
-        # ================= RESULT FIX =================
+        # ================= RESULT CHECK =================
         result = "OPEN"
 
         for j in range(i + 1, len(df)):
@@ -177,9 +185,9 @@ def find_trade(df5, radar_time):
 
         return {
             "time": df.index[i],
-            "entry": round(entry,2),
-            "sl": round(sl,2),
-            "target": round(target,2),
+            "entry": round(entry, 2),
+            "sl": round(sl, 2),
+            "target": round(target, 2),
             "result": result,
             "score": f"{score}/5"
         }
@@ -187,7 +195,7 @@ def find_trade(df5, radar_time):
     return None
 
 
-# ================= BACKTEST ENGINE =================
+# ================= BACKTEST =================
 def scan_stock(symbol, date):
     df15 = to_ist(get_data(symbol, "15m"))
     df5 = to_ist(get_data(symbol, "5m"))
@@ -202,10 +210,10 @@ def scan_stock(symbol, date):
         return None
 
     radars = find_radar(df15)
+
     if not radars:
         return None
 
-    # ✅ FIRST TRADE ONLY
     for r in radars:
         trade = find_trade(df5, r)
 
@@ -253,7 +261,7 @@ def webhook():
         return "ok"
 
     chat_id = data["message"]["chat"]["id"]
-    text = data["message"].get("text","").strip().upper()
+    text = data["message"].get("text", "").strip().upper()
 
     # DATE BACKTEST
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
@@ -270,19 +278,6 @@ def webhook():
 
         return "ok"
 
-    # RANGE BACKTEST
-    if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2} TO \d{4}-\d{2}-\d{2}", text):
-        sym, d1, _, d2 = text.split()
-
-        send(chat_id, f"📊 RANGE {sym}")
-
-        for d in pd.date_range(d1, d2):
-            r = scan_stock(sym+".NS", str(d.date()))
-            if r:
-                send(chat_id, fmt(r))
-
-        return "ok"
-
     send(chat_id, "Command OK")
     return "ok"
 
@@ -293,5 +288,4 @@ def home():
 
 
 if __name__ == "__main__":
-    print("BACKTEST BOT STARTED")
     app.run(host="0.0.0.0", port=PORT)
