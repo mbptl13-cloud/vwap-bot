@@ -1,21 +1,36 @@
 import os
 import re
+import time
 import requests
 import pandas as pd
 import yfinance as yf
 from flask import Flask, request
 from datetime import datetime
+import threading
 
 # ================= CONFIG =================
+
 BOT_TOKEN = "8218143624:AAGr75U7tVRiXKES5WIJneD6MotImx66qis"
+RENDER_URL = "https://vwap-bot-ia6r.onrender.com"
+
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 PORT = int(os.environ.get("PORT", 10000))
 
 app = Flask(__name__)
 
-FNO_STOCKS = ["ADANIGREEN.NS", "BHEL.NS", "RELIANCE.NS", "TCS.NS"]
+LAST_REQUEST = {}
 
-# ================= TELEGRAM =================
+# ================= UTIL =================
+
+def is_duplicate(chat_id, text):
+    key = f"{chat_id}:{text}"
+    now = time.time()
+    if key in LAST_REQUEST and now - LAST_REQUEST[key] < 5:
+        return True
+    LAST_REQUEST[key] = now
+    return False
+
+
 def send(chat_id, text):
     try:
         requests.post(
@@ -27,6 +42,7 @@ def send(chat_id, text):
         pass
 
 # ================= DATA =================
+
 def get_data(symbol, interval):
     df = yf.download(symbol, interval=interval, period="30d", progress=False)
 
@@ -36,14 +52,7 @@ def get_data(symbol, interval):
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = [c[0] for c in df.columns]
 
-    return df[["Open", "High", "Low", "Close", "Volume"]].dropna()
-
-
-def to_ist(df):
-    if df is None:
-        return None
-
-    df = df.copy()
+    df = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
     df.index = pd.to_datetime(df.index)
 
     try:
@@ -60,20 +69,26 @@ def session_filter(df):
     return df.between_time("09:45", "15:30")
 
 
-def filter_date(df, date):
-    d = pd.to_datetime(date).date()
+def filter_date(df, d):
+    d = pd.to_datetime(d).date()
     df = df[df.index.date == d]
     return df if not df.empty else None
 
+# ================= INSTITUTIONAL VWAP =================
 
-# ================= VWAP (CORRECT) =================
 def vwap(df):
+    df = df.copy()
+
     tp = (df["High"] + df["Low"] + df["Close"]) / 3
-    return (tp * df["Volume"]).cumsum() / df["Volume"].cumsum()
+    df["cum_vol"] = df["Volume"].cumsum()
+    df["cum_pv"] = (tp * df["Volume"]).cumsum()
 
+    df["VWAP"] = df["cum_pv"] / df["cum_vol"]
+    return df["VWAP"]
 
-# ================= 15M RADAR =================
-def find_radar(df):
+# ================= RADAR =================
+
+def find_15m(df):
     df = df.copy()
     df["VWAP"] = vwap(df)
     df["VOL_SMA"] = df["Volume"].rolling(20).mean()
@@ -82,88 +97,72 @@ def find_radar(df):
 
     for i in range(20, len(df)):
         r = df.iloc[i]
-        t = r.name.time()
 
-        # ✅ STRICT RADAR WINDOW
+        t = r.name.time()
         if not (pd.to_datetime("09:45").time() <= t <= pd.to_datetime("13:30").time()):
             continue
 
         if pd.isna(r["VWAP"]) or pd.isna(r["VOL_SMA"]):
             continue
 
-        body = abs(r["Close"] - r["Open"]) / r["Open"]
-
+        # relaxed but valid institutional condition
         if (
             r["Close"] > r["VWAP"]
-            and r["Volume"] > 500000
-            and r["Volume"] > 2 * r["VOL_SMA"]
-            and body > 0.006
+            and r["Volume"] > r["VOL_SMA"] * 1.5
+            and r["Close"] > r["Open"]
         ):
-            radars.append(r.name)   # 🔥 NO SHIFT
+            radars.append(df.index[i] + pd.Timedelta(minutes=15))
 
     return radars
 
+# ================= 5M ENTRY =================
 
-# ================= 5M TRADE =================
-def find_trade(df5, radar_time):
-
-    # 🔥 SAME DAY ONLY
-    df = df5[df5.index.date == radar_time.date()]
+def find_5m(df, radar_time):
     df = df[df.index > radar_time].copy()
 
     if df.empty:
         return None
 
-    df = df.copy()
     df["VWAP"] = vwap(df)
 
     for i in range(1, len(df)):
+        r = df.iloc[i]
+        p = df.iloc[i - 1]
 
-        row = df.iloc[i]
-        prev = df.iloc[i - 1]
-
-        # 🔥 STRICT NO SAME CANDLE ENTRY
-        if row.name <= radar_time:
-            continue
-
-        t = row.name.time()
-
-        # ENTRY WINDOW
+        t = r.name.time()
         if not (pd.to_datetime("09:45").time() <= t <= pd.to_datetime("13:30").time()):
             continue
 
-        # ================= SCORE =================
         score = 0
 
-        if row["Low"] <= row["VWAP"] * 1.002 and row["Close"] > row["VWAP"]:
+        if r["Low"] <= r["VWAP"] * 1.002 and r["Close"] > r["VWAP"]:
             score += 1
 
-        if row["Close"] > row["VWAP"]:
+        if r["Close"] > p["High"]:
             score += 1
 
-        if row["Close"] > prev["High"]:
+        if r["Close"] > r["Open"]:
             score += 1
 
-        if row["Volume"] > prev["Volume"] * 1.2:
+        if r["Volume"] > p["Volume"] * 1.2:
             score += 1
 
         if score < 4:
             continue
 
-        # ================= TRADE =================
-        entry = float(row["High"])
-        sl = float(prev["VWAP"])
+        entry = round(r["High"], 2)
+        sl = round(p["VWAP"], 2)
 
         risk = entry - sl
         if risk <= 0:
             continue
 
-        if not (0.003 <= risk / entry <= 0.012):
+        if not (0.003 <= risk / entry <= 0.015):
             continue
 
-        target = entry + (risk * 2)
+        target = round(entry + risk * 2, 2)
 
-        # ================= RESULT =================
+        # RESULT CHECK
         result = "OPEN"
 
         for j in range(i + 1, len(df)):
@@ -181,22 +180,21 @@ def find_trade(df5, radar_time):
                 break
 
         return {
-            "time": row.name,
-            "entry": round(entry, 2),
-            "sl": round(sl, 2),
-            "target": round(target, 2),
+            "time": df.index[i] + pd.Timedelta(minutes=5),
+            "entry": entry,
+            "sl": sl,
+            "target": target,
             "result": result,
             "score": f"{score}/5"
         }
 
     return None
 
+# ================= BACKTEST CORE =================
 
-# ================= BACKTEST =================
 def scan_stock(symbol, date):
-
-    df15 = to_ist(get_data(symbol, "15m"))
-    df5 = to_ist(get_data(symbol, "5m"))
+    df15 = get_data(symbol, "15m")
+    df5 = get_data(symbol, "5m")
 
     if df15 is None:
         return None
@@ -207,35 +205,29 @@ def scan_stock(symbol, date):
     if df15 is None:
         return None
 
-    radars = find_radar(df15)
+    radars = find_15m(df15)
 
     if not radars:
         return None
 
-    for r in radars:
-        trade = find_trade(df5, r)
+    # FIRST TRADE ONLY PER DAY
+    radar_time = radars[0]
 
-        return {
-            "symbol": symbol,
-            "radar": r,
-            "trade": trade
-        }
+    trade = None
 
-    return None
+    if df5 is not None:
+        temp5 = filter_date(df5, radar_time.date())
+        if temp5 is not None:
+            trade = find_5m(temp5, radar_time)
 
-
-def scan_all(date):
-    results = []
-
-    for s in FNO_STOCKS:
-        r = scan_stock(s, date)
-        if r:
-            results.append(r)
-
-    return results
-
+    return {
+        "symbol": symbol,
+        "radar": radar_time,
+        "trade": trade
+    }
 
 # ================= FORMAT =================
+
 def fmt(r):
     msg = f"📊 {r['symbol']}\n"
     msg += f"15M: {r['radar']}\n"
@@ -251,8 +243,8 @@ def fmt(r):
 
     return msg
 
+# ================= COMMANDS =================
 
-# ================= WEBHOOK =================
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json(force=True)
@@ -260,33 +252,56 @@ def webhook():
     if "message" not in data:
         return "ok"
 
-    chat_id = data["message"]["chat"]["id"]
-    text = data["message"].get("text", "").strip().upper()
+    msg = data["message"]
+    chat_id = msg["chat"]["id"]
+    text = msg.get("text", "").strip().upper()
 
-    # DATE BACKTEST
+    if is_duplicate(chat_id, text):
+        return "ok"
+
+    # DATE RANGE
+    if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2} TO \d{4}-\d{2}-\d{2}", text):
+        sym, d1, _, d2 = text.split()
+
+        send(chat_id, f"📊 RANGE {sym}")
+
+        for d in pd.date_range(d1, d2):
+            r = scan_stock(sym + ".NS", str(d.date()))
+            if r:
+                send(chat_id, fmt(r))
+
+        return "ok"
+
+    # SINGLE DATE
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
-
         send(chat_id, f"📅 SCANNING {text}")
 
-        results = scan_all(text)
+        for stock in ["ADANIGREEN.NS", "BHEL.NS", "RELIANCE.NS"]:
+            r = scan_stock(stock, text)
+            if r:
+                send(chat_id, fmt(r))
 
-        if not results:
-            send(chat_id, "No setup")
-            return "ok"
+        return "ok"
 
-        for r in results:
-            send(chat_id, fmt(r))
+    # RADAR
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2} RADAR", text):
+        d = text.split()[0]
+
+        for stock in ["ADANIGREEN.NS", "BHEL.NS"]:
+            r = scan_stock(stock, d)
+            if r:
+                send(chat_id, f"{stock} → {r['radar']}")
 
         return "ok"
 
     send(chat_id, "Command OK")
     return "ok"
 
+# ================= RUN =================
 
 @app.route("/")
 def home():
     return "BACKTEST BOT RUNNING"
-
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=PORT)
