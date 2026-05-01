@@ -19,16 +19,7 @@ app = Flask(__name__)
 
 LAST_REQUEST = {}
 
-# ================= UTILS =================
-
-def is_duplicate(chat_id, text):
-    key = f"{chat_id}:{text}"
-    now = time.time()
-    if key in LAST_REQUEST and now - LAST_REQUEST[key] < 5:
-        return True
-    LAST_REQUEST[key] = now
-    return False
-
+# ================= TELEGRAM =================
 
 def send(chat_id, text):
     try:
@@ -41,11 +32,29 @@ def send(chat_id, text):
         pass
 
 
+def is_duplicate(chat_id, text):
+    key = f"{chat_id}:{text}"
+    now = time.time()
+    if key in LAST_REQUEST and now - LAST_REQUEST[key] < 4:
+        return True
+    LAST_REQUEST[key] = now
+    return False
+
+
 def set_webhook():
     try:
         requests.get(f"{BASE_URL}/setWebhook?url={RENDER_URL}/webhook")
     except:
         pass
+
+# ================= STOCKS =================
+
+FNO_STOCKS = [
+    "ADANIGREEN.NS",
+    "BHEL.NS",
+    "RELIANCE.NS",
+    "TCS.NS"
+]
 
 # ================= DATA =================
 
@@ -80,13 +89,13 @@ def filter_date(df, date):
     df = df[df.index.date == d]
     return df if not df.empty else None
 
-# ================= INSTITUTIONAL VWAP =================
+# ================= VWAP =================
 
 def vwap(df):
     tp = (df["High"] + df["Low"] + df["Close"]) / 3
     return (tp * df["Volume"]).cumsum() / df["Volume"].cumsum()
 
-# ================= 15M RADAR =================
+# ================= RADAR =================
 
 def find_15m(df):
     df = df.copy()
@@ -107,14 +116,14 @@ def find_15m(df):
 
         if (
             r["Close"] > r["VWAP"]
-            and r["Volume"] > r["VOL_SMA"] * 1.5
+            and r["Volume"] > 1.5 * r["VOL_SMA"]
             and r["Close"] > r["Open"]
         ):
             radars.append(df.index[i] + pd.Timedelta(minutes=15))
 
     return radars
 
-# ================= 5M TRADE =================
+# ================= TRADE =================
 
 def find_5m(df, radar_time):
     df = df[df.index > radar_time].copy()
@@ -128,12 +137,12 @@ def find_5m(df, radar_time):
         p = df.iloc[i - 1]
 
         t = r.name.time()
-        if not (pd.to_datetime("09:45").time() <= t <= pd.to_datetime("13:30").time()):
+        if not (pd.to_datetime("09:45").time() <= t <= pd.to_datetime("15:30").time()):
             continue
 
         score = 0
 
-        if r["Low"] <= r["VWAP"] * 1.002 and r["Close"] > r["VWAP"]:
+        if r["Low"] <= r["VWAP"] * 1.002:
             score += 1
 
         if r["Close"] > p["High"]:
@@ -150,13 +159,11 @@ def find_5m(df, radar_time):
 
         entry = round(r["High"], 2)
 
-        # ================= FIXED SL LOGIC =================
-        vwap_value = r["VWAP"]
-
+        # FIXED VWAP SL (safe + realistic)
         sl = round(
             min(
-                vwap_value,
-                r["Low"] - (r["High"] - r["Low"]) * 0.1
+                r["VWAP"],
+                r["Low"] - (r["High"] - r["Low"]) * 0.15
             ),
             2
         )
@@ -197,7 +204,7 @@ def find_5m(df, radar_time):
 
     return None
 
-# ================= BACKTEST =================
+# ================= BACKTEST CORE =================
 
 def scan_stock(symbol, date=None):
     df15 = get_data(symbol, "15m")
@@ -219,7 +226,7 @@ def scan_stock(symbol, date=None):
     if not radars:
         return None
 
-    radar_time = radars[0]   # 1 TRADE PER DAY
+    radar_time = radars[0]  # FIRST TRADE ONLY
 
     trade = None
 
@@ -289,7 +296,7 @@ def webhook():
 
         return "ok"
 
-    # SINGLE STOCK DATE
+    # SYMBOL DATE
     if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2}", text):
         sym, d = text.split()
         r = scan_stock(sym + ".NS", d)
@@ -297,7 +304,24 @@ def webhook():
         if r:
             send(chat_id, fmt(r))
         else:
-            send(chat_id, "No setup")
+            send(chat_id, "❌ No setup")
+
+        return "ok"
+
+    # ONLY DATE
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        send(chat_id, f"📅 SCANNING {text}")
+
+        found = False
+
+        for s in FNO_STOCKS:
+            r = scan_stock(s, text)
+            if r:
+                send(chat_id, fmt(r))
+                found = True
+
+        if not found:
+            send(chat_id, "❌ No setups found")
 
         return "ok"
 
@@ -305,12 +329,18 @@ def webhook():
     if re.fullmatch(r"\d{4}-\d{2}-\d{2} RADAR", text):
         d = text.split()[0]
 
-        stocks = ["ADANIGREEN.NS", "BHEL.NS", "RELIANCE.NS"]
+        send(chat_id, f"📡 RADAR {d}")
 
-        for s in stocks:
+        found = False
+
+        for s in FNO_STOCKS:
             r = scan_stock(s, d)
             if r:
                 send(chat_id, f"{s} → {r['radar']}")
+                found = True
+
+        if not found:
+            send(chat_id, "❌ No radar found")
 
         return "ok"
 
@@ -324,6 +354,6 @@ def home():
     return "BACKTEST BOT RUNNING"
 
 if __name__ == "__main__":
-    print("🚀 STARTING BOT")
+    print("🚀 BOT STARTED")
     set_webhook()
     app.run(host="0.0.0.0", port=PORT)
