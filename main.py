@@ -10,8 +10,8 @@ from flask import Flask, request
 # CONFIG
 # =====================================
 
-BOT_TOKEN = "token"
-RENDER_URL = "https://your-app.onrender.com"
+BOT_TOKEN = "8695080537:AAFolODguF8s1z88s_57HTVModIrmGojlno"
+RENDER_URL = "https://vwap-bot-ia6r.onrender.com"
 
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 PORT = int(os.environ.get("PORT", 10000))
