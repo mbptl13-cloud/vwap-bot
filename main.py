@@ -65,9 +65,9 @@ def to_ist(df):
     return df
 
 
-# def filter_date(df, date):
-    # d = pd.to_datetime(date).date()
-    # return df[df.index.date == d]
+def filter_date(df, date):
+    d = pd.to_datetime(date).date()
+    return df[df.index.date == d]
 
 
 def calculate_vwap(df):
@@ -96,6 +96,7 @@ def find_15m_radars(df):
     radars = []
 
     for i in range(19, len(df)):
+        print("Loop running:", df.index[i])
 
         # ✅ 👉 PASTE IT HERE
         if df.index[i].time() < pd.to_datetime("09:45").time():
