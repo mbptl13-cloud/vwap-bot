@@ -103,6 +103,16 @@ def find_15m_radars(df):
 
         row = df.iloc[i]
 
+        if df.index[i].date() == pd.to_datetime("2026-04-08").date():
+            print("------")
+            print("Time:", df.index[i])
+            print("Close > Open:", row["Close"] > row["Open"])
+            print("Volume:", row["Volume"])
+            print("VOL_SMA20:", row["VOL_SMA20"])
+            print("Volume cond:", row["Volume"] > 2 * row["VOL_SMA20"])
+            print("Body:", abs(row["Close"] - row["Open"]) / row["Open"])
+            print("Range:", (row["High"] - row["Low"]) / row["Open"])
+
         if pd.isna(row["VWAP"]) or pd.isna(row["VOL_SMA20"]):
             continue
 
