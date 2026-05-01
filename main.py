@@ -145,8 +145,8 @@ def find_15m_radars(df):
             vol_val = vol_val.iloc[0]
 
         vol_val = float(vol_val) 
-            if not pd.isna(vol_val) 
-            else 0
+        if not pd.isna(vol_val) 
+        else 0
         if pd.isna(vwap_val) or pd.isna(vol_val):
             continue
 
