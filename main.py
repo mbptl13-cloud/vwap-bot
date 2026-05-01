@@ -84,7 +84,7 @@ def calculate_vwap(df):
 
 
 # ================= STRATEGY =================
-
+print(">>> ENTERED find_15m_radars")
 def find_15m_radars(df):
     if df is None or len(df) < 20:
         return []
