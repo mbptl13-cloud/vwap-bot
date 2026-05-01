@@ -92,7 +92,7 @@ def get_data(symbol, interval):
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = [col[0] for col in df.columns]
 
-        df = df"Open", "High", "Low", "Close", "Volume".dropna()
+        df = df[["Open", "High", "Low", "Close", "Volume"]].dropna()
         return df if not df.empty else None
 
     except Exception as e:
