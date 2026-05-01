@@ -1,319 +1,64 @@
 import os
 import re
-import time
 import requests
 import pandas as pd
 import yfinance as yf
 from flask import Flask, request
 
-# ================= CONFIG =================
-
 BOT_TOKEN = "8218143624:AAGr75U7tVRiXKES5WIJneD6MotImx66qis"
 RENDER_URL = "https://vwap-bot-ia6r.onrender.com"
-
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 PORT = int(os.environ.get("PORT", 10000))
 
 app = Flask(__name__)
-LAST_REQUEST = {}
+
+FNO_STOCKS = ["ADANIGREEN.NS", "BHEL.NS", "RELIANCE.NS", "TCS.NS"]
 
 # ================= TELEGRAM =================
 
 def send(chat_id, text):
     try:
         requests.post(f"{BASE_URL}/sendMessage",
-                      json={"chat_id": chat_id, "text": text},
-                      timeout=20)
+                      json={"chat_id": chat_id, "text": text})
     except:
         pass
-
-
-def is_duplicate(chat_id, text):
-    key = f"{chat_id}:{text}"
-    now = time.time()
-    if key in LAST_REQUEST and now - LAST_REQUEST[key] < 3:
-        return True
-    LAST_REQUEST[key] = now
-    return False
-
-
-def set_webhook():
-    try:
-        requests.get(f"{BASE_URL}/setWebhook?url={RENDER_URL}/webhook")
-    except:
-        pass
-
-# ================= STOCKS =================
-
-FNO_STOCKS = [
-    "360ONE.NS",
-    "ABB.NS",
-    "APLAPOLLO.NS",
-    "AUBANK.NS",
-    "ADANIENSOL.NS",
-    "ADANIENT.NS",
-    "ADANIGREEN.NS",
-    "ADANIPORTS.NS",
-    "ADANIPOWER.NS",
-    "ABCAPITAL.NS",
-    "ALKEM.NS",
-    "AMBER.NS",
-    "AMBUJACEM.NS",
-    "ANGELONE.NS",
-    "APOLLOHOSP.NS",
-    "ASHOKLEY.NS",
-    "ASIANPAINT.NS",
-    "ASTRAL.NS",
-    "AUROPHARMA.NS",
-    "DMART.NS",
-    "AXISBANK.NS",
-    "BSE.NS",
-    "BAJAJ-AUTO.NS",
-    "BAJFINANCE.NS",
-    "BAJAJFINSV.NS",
-    "BAJAJHLDNG.NS",
-    "BANDHANBNK.NS",
-    "BANKBARODA.NS",
-    "BANKINDIA.NS",
-    "BDL.NS",
-    "BEL.NS",
-    "BHARATFORG.NS",
-    "BHEL.NS",
-    "BPCL.NS",
-    "BHARTIARTL.NS",
-    "BIOCON.NS",
-    "BLUESTARCO.NS",
-    "BOSCHLTD.NS",
-    "BRITANNIA.NS",
-    "CGPOWER.NS",
-    "CANBK.NS",
-    "CDSL.NS",
-    "CHOLAFIN.NS",
-    "CIPLA.NS",
-    "COALINDIA.NS",
-    "COCHINSHIP.NS",
-    "COFORGE.NS",
-    "COLPAL.NS",
-    "CAMS.NS",
-    "CONCOR.NS",
-    "CROMPTON.NS",
-    "CUMMINSIND.NS",
-    "DLF.NS",
-    "DABUR.NS",
-    "DALBHARAT.NS",
-    "DELHIVERY.NS",
-    "DIVISLAB.NS",
-    "DIXON.NS",
-    "DRREDDY.NS",
-    "ETERNAL.NS",
-    "EICHERMOT.NS",
-    "EXIDEIND.NS",
-    "FORCEMOT.NS",
-    "NYKAA.NS",
-    "FORTIS.NS",
-    "GAIL.NS",
-    "GMRAIRPORT.NS",
-    "GLENMARK.NS",
-    "GODFRYPHLP.NS",
-    "GODREJCP.NS",
-    "GODREJPROP.NS",
-    "GRASIM.NS",
-    "HCLTECH.NS",
-    "HDFCAMC.NS",
-    "HDFCBANK.NS",
-    "HDFCLIFE.NS",
-    "HAVELLS.NS",
-    "HEROMOTOCO.NS",
-    "HINDALCO.NS",
-    "HAL.NS",
-    "HINDPETRO.NS",
-    "HINDUNILVR.NS",
-    "HINDZINC.NS",
-    "POWERINDIA.NS",
-    "HUDCO.NS",
-    "HYUNDAI.NS",
-    "ICICIBANK.NS",
-    "ICICIGI.NS",
-    "ICICIPRULI.NS",
-    "IDFCFIRSTB.NS",
-    "ITC.NS",
-    "INDIANB.NS",
-    "IEX.NS",
-    "IOC.NS",
-    "IRFC.NS",
-    "IREDA.NS",
-    "INDUSTOWER.NS",
-    "INDUSINDBK.NS",
-    "NAUKRI.NS",
-    "INFY.NS",
-    "INOXWIND.NS",
-    "INDIGO.NS",
-    "JINDALSTEL.NS",
-    "JSWENERGY.NS",
-    "JSWSTEEL.NS",
-    "JIOFIN.NS",
-    "JUBLFOOD.NS",
-    "KEI.NS",
-    "KPITTECH.NS",
-    "KALYANKJIL.NS",
-    "KAYNES.NS",
-    "KFINTECH.NS",
-    "KOTAKBANK.NS",
-    "LTF.NS",
-    "LICHSGFIN.NS",
-    "LTM.NS",
-    "LT.NS",
-    "LAURUSLABS.NS",
-    "LICI.NS",
-    "LODHA.NS",
-    "LUPIN.NS",
-    "M&M.NS",
-    "MANAPPURAM.NS",
-    "MANKIND.NS",
-    "MARICO.NS",
-    "MARUTI.NS",
-    "MFSL.NS",
-    "MAXHEALTH.NS",
-    "MAZDOCK.NS",
-    "MOTILALOFS.NS",
-    "MPHASIS.NS",
-    "MCX.NS",
-    "MUTHOOTFIN.NS",
-    "NBCC.NS",
-    "NHPC.NS",
-    "NMDC.NS",
-    "NTPC.NS",
-    "NATIONALUM.NS",
-    "NESTLEIND.NS",
-    "NAM-INDIA.NS",
-    "NUVAMA.NS",
-    "OBEROIRLTY.NS",
-    "ONGC.NS",
-    "OIL.NS",
-    "PAYTM.NS",
-    "OFSS.NS",
-    "POLICYBZR.NS",
-    "PGEL.NS",
-    "PIIND.NS",
-    "PNBHOUSING.NS",
-    "PAGEIND.NS",
-    "PATANJALI.NS",
-    "PERSISTENT.NS",
-    "PETRONET.NS",
-    "PIDILITIND.NS",
-    "PPLPHARMA.NS",
-    "POLYCAB.NS",
-    "PFC.NS",
-    "POWERGRID.NS",
-    "PREMIERENE.NS",
-    "PRESTIGE.NS",
-    "PNB.NS",
-    "RBLBANK.NS",
-    "RECLTD.NS",
-    "RVNL.NS",
-    "RELIANCE.NS",
-    "SBICARD.NS",
-    "SBILIFE.NS",
-    "SHREECEM.NS",
-    "SRF.NS",
-    "SAMMAANCAP.NS",
-    "MOTHERSON.NS",
-    "SHRIRAMFIN.NS",
-    "SIEMENS.NS",
-    "SOLARINDS.NS",
-    "SONACOMS.NS",
-    "SBIN.NS",
-    "SAIL.NS",
-    "SUNPHARMA.NS",
-    "SUPREMEIND.NS",
-    "SUZLON.NS",
-    "SWIGGY.NS",
-    "TATACONSUM.NS",
-    "TVSMOTOR.NS",
-    "TCS.NS",
-    "TATAELXSI.NS",
-    "TMPV.NS",
-    "TATAPOWER.NS",
-    "TATASTEEL.NS",
-    "TATATECH.NS",
-    "TECHM.NS",
-    "FEDERALBNK.NS",
-    "INDHOTEL.NS",
-    "PHOENIXLTD.NS",
-    "TITAN.NS",
-    "TORNTPHARM.NS",
-    "TORNTPOWER.NS",
-    "TRENT.NS",
-    "TIINDIA.NS",
-    "UNOMINDA.NS",
-    "UPL.NS",
-    "ULTRACEMCO.NS",
-    "UNIONBANK.NS",
-    "UNITDSPR.NS",
-    "VBL.NS",
-    "VEDL.NS",
-    "VMM.NS",
-    "IDEA.NS",
-    "VOLTAS.NS",
-    "WAAREEENER.NS",
-    "WIPRO.NS",
-    "YESBANK.NS",
-    "ZYDUSLIFE.NS"
-]
 
 # ================= DATA =================
 
 def get_data(symbol, interval):
-    try:
-        df = yf.download(symbol, interval=interval, period="30d", progress=False)
+    df = yf.download(symbol, interval=interval, period="30d", progress=False)
 
-        if df is None or df.empty:
-            return None
-
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = [c[0] for c in df.columns]
-
-        df = df[["Open","High","Low","Close","Volume"]].dropna()
-        df.index = pd.to_datetime(df.index)
-
-        if df.index.tz is None:
-            df.index = df.index.tz_localize("UTC")
-        df.index = df.index.tz_convert("Asia/Kolkata")
-
-        return df
-
-    except:
+    if df is None or df.empty:
         return None
 
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = [c[0] for c in df.columns]
 
-def filter_date(df, d):
-    d = pd.to_datetime(d).date()
-    df = df[df.index.date == d]
-    return df if not df.empty else None
+    df = df[["Open","High","Low","Close","Volume"]].dropna()
 
-# ================= VWAP =================
+    df.index = pd.to_datetime(df.index)
+    if df.index.tz is None:
+        df.index = df.index.tz_localize("UTC")
+    df.index = df.index.tz_convert("Asia/Kolkata")
 
-def vwap(df):
-    df = df.copy()
+    return df
 
+# ================= VWAP (DAILY RESET) =================
+
+def add_vwap(df):
     tp = (df["High"] + df["Low"] + df["Close"]) / 3
-
     df["TPV"] = tp * df["Volume"]
 
-    # GROUP BY DATE → RESET DAILY
     df["CUM_TPV"] = df.groupby(df.index.date)["TPV"].cumsum()
     df["CUM_VOL"] = df.groupby(df.index.date)["Volume"].cumsum()
 
     df["VWAP"] = df["CUM_TPV"] / df["CUM_VOL"]
-
-    return df["VWAP"]
+    return df
 
 # ================= 15M RADAR =================
 
 def find_15m(df):
-    df = df.copy()
-
-    df["VWAP"] = vwap(df)
+    df = add_vwap(df.copy())
     df["VOL_SMA20"] = df["Volume"].rolling(20).mean()
 
     radars = []
@@ -321,7 +66,6 @@ def find_15m(df):
     for i in range(20, len(df)):
         r = df.iloc[i]
 
-        # Time filter
         t = r.name.time()
         if not (pd.to_datetime("09:45").time() <= t <= pd.to_datetime("13:30").time()):
             continue
@@ -329,53 +73,39 @@ def find_15m(df):
         if pd.isna(r["VWAP"]) or pd.isna(r["VOL_SMA20"]):
             continue
 
-        # CONDITIONS (EXACT MATCH)
         volume_cond = r["Volume"] > 500000
         turnover_cond = (r["Close"] * r["Volume"]) > 150000000
 
         range_pct = ((r["High"] - r["Low"]) / r["Open"]) * 100
-        range_cond = range_pct > 1
-
         body_pct = (abs(r["Close"] - r["Open"]) / r["Open"]) * 100
+
+        range_cond = range_pct > 1
         body_cond = body_pct > 0.6
 
         vwap_cond = r["Close"] > r["VWAP"]
-        vol_spike_cond = r["Volume"] > (2 * r["VOL_SMA20"])
-        bullish_cond = r["Close"] > r["Open"]
+        vol_spike = r["Volume"] > (2 * r["VOL_SMA20"])
+        bullish = r["Close"] > r["Open"]
 
-        if (
-            volume_cond and
-            turnover_cond and
-            range_cond and
-            body_cond and
-            vwap_cond and
-            vol_spike_cond and
-            bullish_cond
-        ):
-            radars.append(df.index[i] + pd.Timedelta(minutes=15))
+        if all([volume_cond, turnover_cond, range_cond,
+                body_cond, vwap_cond, vol_spike, bullish]):
+            
+            radars.append(r.name + pd.Timedelta(minutes=15))
 
     return radars
 
 # ================= 5M TRADE =================
 
 def find_5m(df, radar_time):
-    if df is None:
-        return None
+    df = add_vwap(df.copy())
 
-    df = df.copy()
-
-    # FULL VWAP first
-    df["VWAP"] = vwap(df)
-
-    # After radar
+    # only after radar
     df = df[df.index > radar_time]
-
     if df.empty:
         return None
 
     for i in range(1, len(df)):
         r = df.iloc[i]
-        p = df.iloc[i - 1]
+        p = df.iloc[i-1]
 
         t = r.name.time()
         if not (pd.to_datetime("09:45").time() <= t <= pd.to_datetime("15:30").time()):
@@ -383,14 +113,10 @@ def find_5m(df, radar_time):
 
         score = 0
 
-        if r["Low"] <= r["VWAP"] * 1.003:
-            score += 1
-        if r["Close"] > p["High"]:
-            score += 1
-        if r["Close"] > r["Open"]:
-            score += 1
-        if r["Volume"] > p["Volume"] * 1.1:
-            score += 1
+        if r["Low"] <= r["VWAP"] * 1.003: score += 1
+        if r["Close"] > p["High"]: score += 1
+        if r["Close"] > r["Open"]: score += 1
+        if r["Volume"] > p["Volume"] * 1.1: score += 1
 
         if score < 3:
             continue
@@ -406,14 +132,14 @@ def find_5m(df, radar_time):
         if risk <= 0:
             continue
 
-        if not (0.003 <= risk / entry <= 0.02):
+        if not (0.003 <= risk/entry <= 0.02):
             continue
 
-        target = round(entry + risk * 2, 2)
+        target = round(entry + risk*2, 2)
 
         result = "OPEN"
 
-        for j in range(i + 1, len(df)):
+        for j in range(i+1, len(df)):
             nxt = df.iloc[j]
 
             if nxt.name.time() > pd.to_datetime("15:30").time():
@@ -428,7 +154,7 @@ def find_5m(df, radar_time):
                 break
 
         return {
-            "time": df.index[i],
+            "time": r.name,
             "entry": entry,
             "sl": sl,
             "target": target,
@@ -447,33 +173,23 @@ def scan_stock(sym, date):
     if df15 is None:
         return None
 
-    df15 = filter_date(df15, date)
-    if df15 is None:
+    df15 = df15[df15.index.date == pd.to_datetime(date).date()]
+    if df15.empty:
         return None
 
     radars = find_15m(df15)
 
     if not radars:
-        return {
-            "symbol": sym,
-            "radar": f"{date} → NO RADAR",
-            "trade": None
-        }
+        return {"symbol": sym, "radar": f"{date} → NO RADAR", "trade": None}
 
     radar = radars[0]
 
     trade = None
-
     if df5 is not None:
-        df5 = filter_date(df5, date)
-        if df5 is not None:
-            trade = find_5m(df5, radar)
+        df5 = df5[df5.index.date == radar.date()]
+        trade = find_5m(df5, radar)
 
-    return {
-        "symbol": sym,
-        "radar": radar,
-        "trade": trade
-    }
+    return {"symbol": sym, "radar": radar, "trade": trade}
 
 # ================= RANGE =================
 
@@ -481,8 +197,7 @@ def run_range(sym, d1, d2):
     res = []
     for d in pd.date_range(d1, d2):
         r = scan_stock(sym, str(d.date()))
-        if r:
-            res.append(r)
+        res.append(r)
     return res
 
 # ================= FORMAT =================
@@ -491,15 +206,11 @@ def fmt(r):
     if isinstance(r["radar"], str):
         return f"{r['symbol']} → {r['radar']}"
 
-    msg = f"📊 {r['symbol']}\n"
-    msg += f"15M: {r['radar']}\n"
+    msg = f"📊 {r['symbol']}\n15M: {r['radar']}\n"
 
     if r["trade"]:
         t = r["trade"]
-        msg += f"5M: {t['time']}\n"
-        msg += f"Score: {t['score']}\n"
-        msg += f"Entry: {t['entry']} SL: {t['sl']} TG: {t['target']}\n"
-        msg += f"Result: {t['result']}"
+        msg += f"5M: {t['time']}\nEntry: {t['entry']} SL: {t['sl']} TG: {t['target']}\nResult: {t['result']}"
     else:
         msg += "5M: NO SETUP"
 
@@ -514,62 +225,47 @@ def webhook():
     if "message" not in data:
         return "ok"
 
-    msg = data["message"]
-    chat_id = msg["chat"]["id"]
-    text = msg.get("text", "").strip().upper()
-
-    if is_duplicate(chat_id, text):
-        return "ok"
+    chat_id = data["message"]["chat"]["id"]
+    text = data["message"].get("text","").upper()
 
     # RANGE
     if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2} TO \d{4}-\d{2}-\d{2}", text):
-        sym, d1, _, d2 = text.split()
+        sym,d1,_,d2 = text.split()
         send(chat_id, f"📊 RANGE {sym}")
-
-        for r in run_range(sym + ".NS", d1, d2):
+        for r in run_range(sym+".NS", d1, d2):
             send(chat_id, fmt(r))
-
         return "ok"
 
     # SYMBOL DATE
     if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2}", text):
-        sym, d = text.split()
-        r = scan_stock(sym + ".NS", d)
-        send(chat_id, fmt(r))
+        sym,d = text.split()
+        send(chat_id, fmt(scan_stock(sym+".NS", d)))
         return "ok"
 
     # DATE
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
-        send(chat_id, f"📅 SCANNING {text}")
-
         for s in FNO_STOCKS:
-            r = scan_stock(s, text)
-            if r:
-                send(chat_id, fmt(r))
-
+            send(chat_id, fmt(scan_stock(s, text)))
         return "ok"
 
-    # DATE RADAR
+    # RADAR
     if re.fullmatch(r"\d{4}-\d{2}-\d{2} RADAR", text):
         d = text.split()[0]
         send(chat_id, f"📡 RADAR {d}")
-
         for s in FNO_STOCKS:
             r = scan_stock(s, d)
             if r and not isinstance(r["radar"], str):
                 send(chat_id, f"{s} → {r['radar']}")
-
         return "ok"
 
-    send(chat_id, "Command OK")
     return "ok"
 
 # ================= RUN =================
 
 @app.route("/")
 def home():
-    return "BACKTEST BOT RUNNING"
+    return "RUNNING"
 
 if __name__ == "__main__":
-    set_webhook()
+    requests.get(f"{BASE_URL}/setWebhook?url={RENDER_URL}/webhook")
     app.run(host="0.0.0.0", port=PORT)
