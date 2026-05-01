@@ -65,9 +65,9 @@ def to_ist(df):
     return df
 
 
-def filter_date(df, date):
-    d = pd.to_datetime(date).date()
-    return df[df.index.date == d]
+# def filter_date(df, date):
+    # d = pd.to_datetime(date).date()
+    # return df[df.index.date == d]
 
 
 def calculate_vwap(df):
