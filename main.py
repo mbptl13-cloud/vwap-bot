@@ -6,7 +6,6 @@ import pandas as pd
 import yfinance as yf
 from flask import Flask, request
 from datetime import datetime
-import threading
 
 # ================= CONFIG =================
 
@@ -20,7 +19,7 @@ app = Flask(__name__)
 
 LAST_REQUEST = {}
 
-# ================= UTIL =================
+# ================= UTILS =================
 
 def is_duplicate(chat_id, text):
     key = f"{chat_id}:{text}"
@@ -38,6 +37,13 @@ def send(chat_id, text):
             json={"chat_id": chat_id, "text": text},
             timeout=20
         )
+    except:
+        pass
+
+
+def set_webhook():
+    try:
+        requests.get(f"{BASE_URL}/setWebhook?url={RENDER_URL}/webhook")
     except:
         pass
 
@@ -69,24 +75,18 @@ def session_filter(df):
     return df.between_time("09:45", "15:30")
 
 
-def filter_date(df, d):
-    d = pd.to_datetime(d).date()
+def filter_date(df, date):
+    d = pd.to_datetime(date).date()
     df = df[df.index.date == d]
     return df if not df.empty else None
 
 # ================= INSTITUTIONAL VWAP =================
 
 def vwap(df):
-    df = df.copy()
-
     tp = (df["High"] + df["Low"] + df["Close"]) / 3
-    df["cum_vol"] = df["Volume"].cumsum()
-    df["cum_pv"] = (tp * df["Volume"]).cumsum()
+    return (tp * df["Volume"]).cumsum() / df["Volume"].cumsum()
 
-    df["VWAP"] = df["cum_pv"] / df["cum_vol"]
-    return df["VWAP"]
-
-# ================= RADAR =================
+# ================= 15M RADAR =================
 
 def find_15m(df):
     df = df.copy()
@@ -105,7 +105,6 @@ def find_15m(df):
         if pd.isna(r["VWAP"]) or pd.isna(r["VOL_SMA"]):
             continue
 
-        # relaxed but valid institutional condition
         if (
             r["Close"] > r["VWAP"]
             and r["Volume"] > r["VOL_SMA"] * 1.5
@@ -115,11 +114,10 @@ def find_15m(df):
 
     return radars
 
-# ================= 5M ENTRY =================
+# ================= 5M TRADE =================
 
 def find_5m(df, radar_time):
     df = df[df.index > radar_time].copy()
-
     if df.empty:
         return None
 
@@ -151,7 +149,17 @@ def find_5m(df, radar_time):
             continue
 
         entry = round(r["High"], 2)
-        sl = round(p["VWAP"], 2)
+
+        # ================= FIXED SL LOGIC =================
+        vwap_value = r["VWAP"]
+
+        sl = round(
+            min(
+                vwap_value,
+                r["Low"] - (r["High"] - r["Low"]) * 0.1
+            ),
+            2
+        )
 
         risk = entry - sl
         if risk <= 0:
@@ -160,9 +168,8 @@ def find_5m(df, radar_time):
         if not (0.003 <= risk / entry <= 0.015):
             continue
 
-        target = round(entry + risk * 2, 2)
+        target = round(entry + (risk * 2), 2)
 
-        # RESULT CHECK
         result = "OPEN"
 
         for j in range(i + 1, len(df)):
@@ -180,7 +187,7 @@ def find_5m(df, radar_time):
                 break
 
         return {
-            "time": df.index[i] + pd.Timedelta(minutes=5),
+            "time": df.index[i],
             "entry": entry,
             "sl": sl,
             "target": target,
@@ -190,9 +197,9 @@ def find_5m(df, radar_time):
 
     return None
 
-# ================= BACKTEST CORE =================
+# ================= BACKTEST =================
 
-def scan_stock(symbol, date):
+def scan_stock(symbol, date=None):
     df15 = get_data(symbol, "15m")
     df5 = get_data(symbol, "5m")
 
@@ -200,7 +207,9 @@ def scan_stock(symbol, date):
         return None
 
     df15 = session_filter(df15)
-    df15 = filter_date(df15, date)
+
+    if date:
+        df15 = filter_date(df15, date)
 
     if df15 is None:
         return None
@@ -210,8 +219,7 @@ def scan_stock(symbol, date):
     if not radars:
         return None
 
-    # FIRST TRADE ONLY PER DAY
-    radar_time = radars[0]
+    radar_time = radars[0]   # 1 TRADE PER DAY
 
     trade = None
 
@@ -225,6 +233,18 @@ def scan_stock(symbol, date):
         "radar": radar_time,
         "trade": trade
     }
+
+# ================= RANGE =================
+
+def run_range(symbol, d1, d2):
+    results = []
+
+    for d in pd.date_range(d1, d2):
+        r = scan_stock(symbol, str(d.date()))
+        if r:
+            results.append(r)
+
+    return results
 
 # ================= FORMAT =================
 
@@ -243,7 +263,7 @@ def fmt(r):
 
     return msg
 
-# ================= COMMANDS =================
+# ================= WEBHOOK =================
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
@@ -259,38 +279,38 @@ def webhook():
     if is_duplicate(chat_id, text):
         return "ok"
 
-    # DATE RANGE
+    # RANGE
     if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2} TO \d{4}-\d{2}-\d{2}", text):
         sym, d1, _, d2 = text.split()
-
         send(chat_id, f"📊 RANGE {sym}")
 
-        for d in pd.date_range(d1, d2):
-            r = scan_stock(sym + ".NS", str(d.date()))
-            if r:
-                send(chat_id, fmt(r))
+        for r in run_range(sym + ".NS", d1, d2):
+            send(chat_id, fmt(r))
 
         return "ok"
 
-    # SINGLE DATE
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
-        send(chat_id, f"📅 SCANNING {text}")
+    # SINGLE STOCK DATE
+    if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2}", text):
+        sym, d = text.split()
+        r = scan_stock(sym + ".NS", d)
 
-        for stock in ["ADANIGREEN.NS", "BHEL.NS", "RELIANCE.NS"]:
-            r = scan_stock(stock, text)
-            if r:
-                send(chat_id, fmt(r))
+        if r:
+            send(chat_id, fmt(r))
+        else:
+            send(chat_id, "No setup")
 
         return "ok"
 
-    # RADAR
+    # DATE RADAR
     if re.fullmatch(r"\d{4}-\d{2}-\d{2} RADAR", text):
         d = text.split()[0]
 
-        for stock in ["ADANIGREEN.NS", "BHEL.NS"]:
-            r = scan_stock(stock, d)
+        stocks = ["ADANIGREEN.NS", "BHEL.NS", "RELIANCE.NS"]
+
+        for s in stocks:
+            r = scan_stock(s, d)
             if r:
-                send(chat_id, f"{stock} → {r['radar']}")
+                send(chat_id, f"{s} → {r['radar']}")
 
         return "ok"
 
@@ -304,4 +324,6 @@ def home():
     return "BACKTEST BOT RUNNING"
 
 if __name__ == "__main__":
+    print("🚀 STARTING BOT")
+    set_webhook()
     app.run(host="0.0.0.0", port=PORT)
