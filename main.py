@@ -1,5 +1,6 @@
 import os
 import re
+import threading
 import requests
 import pandas as pd
 import yfinance as yf
@@ -9,14 +10,14 @@ from datetime import datetime
 # ================= CONFIG =================
 
 BOT_TOKEN = "8218143624:AAGr75U7tVRiXKES5WIJneD6MotImx66qis"
-RENDER_URL = "https://vwap-bot-ia6r.onrender.com"
+RENDER_URL = "https://your-app.onrender.com"
 
 BASE_URL = f"https://api.telegram.org/bot{BOT_TOKEN}"
 PORT = int(os.environ.get("PORT", 10000))
 
 app = Flask(__name__)
 
-# ================= STOCK LIST =================
+# ================= STOCKS =================
 
 FNO_STOCKS = [
     "ADANIGREEN.NS","BHEL.NS","RELIANCE.NS","TCS.NS"
@@ -54,30 +55,27 @@ def get_data(symbol):
     CACHE[symbol] = (df15, df5)
     return df15, df5
 
-# ================= VWAP (FIXED) =================
+# ================= VWAP FIX =================
 
 def calculate_vwap(df):
     df = df.copy()
     df["date"] = df.index.date
 
-    vwap_list = []
+    out = []
 
     for d in df["date"].unique():
         temp = df[df["date"] == d]
-
         tp = (temp["High"] + temp["Low"] + temp["Close"]) / 3
         vwap = (tp * temp["Volume"]).cumsum() / temp["Volume"].cumsum()
+        out.extend(vwap)
 
-        vwap_list.extend(vwap)
-
-    df["VWAP"] = vwap_list
+    df["VWAP"] = out
     return df.drop(columns=["date"])
 
 # ================= 15M RADAR =================
 
-def find_radars(df15):
-    df = calculate_vwap(df15)
-
+def find_radars(df):
+    df = calculate_vwap(df)
     df["VOL_SMA"] = df["Volume"].rolling(20).mean()
 
     radars = []
@@ -141,7 +139,6 @@ def find_trade(df5, radar_time):
 
         target = round(entry + risk * 2, 2)
 
-        # RESULT CHECK
         result = "OPEN"
 
         for j in range(i + 1, len(df)):
@@ -169,9 +166,9 @@ def find_trade(df5, radar_time):
 
     return None
 
-# ================= SCAN (CORE FIX) =================
+# ================= SCAN =================
 
-def scan_stock(symbol, date=None):
+def scan_stock(symbol, date):
     df15, df5 = get_data(symbol)
     if df15 is None:
         return None
@@ -180,28 +177,25 @@ def scan_stock(symbol, date=None):
 
     radars = find_radars(df15)
 
-    used_days = set()
+    used_day = False
 
-    for radar_time in radars:
-        if date and radar_time.date() != pd.to_datetime(date).date():
+    for r_time in radars:
+        if r_time.date() != pd.to_datetime(date).date():
             continue
 
-        day = radar_time.date()
-
-        # ONLY FIRST TRADE PER DAY
-        if day in used_days:
-            continue
+        if used_day:
+            break
 
         trade = find_trade(
-            df5[df5.index.date == day],
-            radar_time
+            df5[df5.index.date == r_time.date()],
+            r_time
         )
 
         if trade:
-            used_days.add(day)
+            used_day = True
             return {
                 "symbol": symbol,
-                "radar": radar_time,
+                "radar": r_time,
                 "trade": trade
             }
 
@@ -224,6 +218,37 @@ def format_result(r):
 
     return msg
 
+# ================= WORKERS =================
+
+def scan_date(chat_id, date):
+    send(chat_id, f"📅 SCANNING {date}...")
+
+    found = False
+
+    for s in FNO_STOCKS:
+        r = scan_stock(s, date)
+        if r:
+            send(chat_id, format_result(r))
+            found = True
+
+    if not found:
+        send(chat_id, "No setup found")
+
+
+def scan_radar(chat_id, date):
+    send(chat_id, f"📊 RADAR {date}...")
+
+    for s in FNO_STOCKS:
+        df15, _ = get_data(s)
+        if df15 is None:
+            continue
+
+        radars = find_radars(df15)
+
+        for r in radars:
+            if r.date() == pd.to_datetime(date).date():
+                send(chat_id, f"{s} → {r.strftime('%H:%M')}")
+
 # ================= WEBHOOK =================
 
 @app.route("/webhook", methods=["POST"])
@@ -234,29 +259,27 @@ def webhook():
         return "ok"
 
     chat_id = data["message"]["chat"]["id"]
-    text = data["message"].get("text", "").upper()
+    text = data["message"].get("text", "").strip().upper()
 
     # DATE
     if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
-        send(chat_id, "📅 SCANNING...")
-
-        for s in FNO_STOCKS:
-            r = scan_stock(s, text)
-            if r:
-                send(chat_id, format_result(r))
-
+        threading.Thread(target=scan_date, args=(chat_id, text)).start()
         return "ok"
 
-    # SINGLE STOCK
+    # RADAR
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2} RADAR", text):
+        d = text.split()[0]
+        threading.Thread(target=scan_radar, args=(chat_id, d)).start()
+        return "ok"
+
+    # SINGLE
     if re.fullmatch(r"[A-Z]+ \d{4}-\d{2}-\d{2}", text):
         sym, d = text.split()
         r = scan_stock(sym + ".NS", d)
-
         if r:
             send(chat_id, format_result(r))
         else:
             send(chat_id, "No setup")
-
         return "ok"
 
     # RANGE
@@ -267,23 +290,6 @@ def webhook():
             r = scan_stock(sym + ".NS", str(d.date()))
             if r:
                 send(chat_id, format_result(r))
-
-        return "ok"
-
-    # RADAR
-    if re.fullmatch(r"\d{4}-\d{2}-\d{2} RADAR", text):
-        d = text.split()[0]
-
-        for s in FNO_STOCKS:
-            df15, _ = get_data(s)
-            if df15 is None:
-                continue
-
-            radars = find_radars(df15)
-
-            for r in radars:
-                if r.date() == pd.to_datetime(d).date():
-                    send(chat_id, f"{s} → {r.strftime('%H:%M')}")
 
         return "ok"
 
