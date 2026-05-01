@@ -271,7 +271,7 @@ Send STOP to cancel running scan
 
         for i, d in enumerate(pd.date_range(d1, d2)):
             if not ACTIVE_TASKS.get(chat_id):
-                return "ok"
+                break
 
             if i > 20:
                 send(chat_id, "⚠️ Limit reached")
