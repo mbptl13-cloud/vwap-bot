@@ -7,6 +7,7 @@ import pytz
 import asyncio
 import threading
 import os
+import requests
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from telegram import Bot
 from flask import Flask
@@ -23,8 +24,8 @@ app = Flask(__name__)
 
 last_run_key = None
 
-# ================= YOUR STOCK LIST =================
-FNO_STOCKS = FNO_STOCKS = [
+# ================= STOCK LIST =================
+FNO_STOCKS = [
 "360ONE.NS","ABB.NS","APLAPOLLO.NS","AUBANK.NS","ADANIENSOL.NS","ADANIENT.NS","ADANIGREEN.NS","ADANIPORTS.NS","ADANIPOWER.NS","ABCAPITAL.NS","ALKEM.NS","AMBER.NS","AMBUJACEM.NS","ANGELONE.NS","APOLLOHOSP.NS","ASHOKLEY.NS","ASIANPAINT.NS","ASTRAL.NS","AUROPHARMA.NS","DMART.NS",
 
 "AXISBANK.NS","BSE.NS","BAJAJ-AUTO.NS","BAJFINANCE.NS","BAJAJFINSV.NS","BAJAJHLDNG.NS","BANDHANBNK.NS","BANKBARODA.NS","BANKINDIA.NS","BDL.NS","BEL.NS","BHARATFORG.NS","BHEL.NS","BPCL.NS","BHARTIARTL.NS","BIOCON.NS","BLUESTARCO.NS","BOSCHLTD.NS","BRITANNIA.NS","CGPOWER.NS",
@@ -52,30 +53,28 @@ FNO_STOCKS = FNO_STOCKS = [
 async def send_telegram(msg):
     try:
         await bot.send_message(chat_id=CHAT_ID, text=msg)
-        print("📤", msg)
+        print("📤 Sent:", msg)
     except Exception as e:
-        print("Telegram Error:", e)
+        print("❌ Telegram Error:", e)
 
 # ================= STRATEGY =================
 def check_conditions(df):
     try:
         df = df.copy()
-        df["vwap"] = (
-            (df["Volume"] * (df["High"] + df["Low"] + df["Close"]) / 3).cumsum()
-            / df["Volume"].cumsum()
-        )
-        df["vol_sma20"] = df["Volume"].rolling(20).mean()
+
+        df['vwap'] = (df['Volume'] * (df['High'] + df['Low'] + df['Close'])/3).cumsum() / df['Volume'].cumsum()
+        df['vol_sma20'] = df['Volume'].rolling(20).mean()
 
         last = df.iloc[-1]
 
         return (
-            last["Volume"] > 500000
-            and (last["Close"] * last["Volume"]) > 150000000
-            and ((last["High"] - last["Low"]) / last["Open"] * 100) > 1
-            and (abs(last["Close"] - last["Open"]) / last["Open"] * 100) > 0.6
-            and last["Close"] > last["vwap"]
-            and last["Volume"] > (last["vol_sma20"] * 2)
-            and last["Close"] > last["Open"]
+            last['Volume'] > 500000 and
+            (last['Close'] * last['Volume']) > 150000000 and
+            ((last['High'] - last['Low']) / last['Open'] * 100) > 1 and
+            (abs(last['Close'] - last['Open']) / last['Open'] * 100) > 0.6 and
+            last['Close'] > last['vwap'] and
+            last['Volume'] > (last['vol_sma20'] * 2) and
+            last['Close'] > last['Open']
         )
     except:
         return False
@@ -94,7 +93,7 @@ def process_stock(stock):
             return None
 
         if check_conditions(df):
-            return stock.replace(".NS", "")
+            return stock.replace(".NS","")
 
     except Exception as e:
         print(stock, e)
@@ -127,7 +126,7 @@ def scan_market():
         for future in as_completed(futures):
             all_results.extend(future.result())
 
-    now = datetime.datetime.now(pytz.timezone("Asia/Kolkata")).strftime("%H:%M")
+    now = datetime.datetime.now(pytz.timezone('Asia/Kolkata')).strftime("%H:%M")
 
     if all_results:
         msg = f"✅ SCAN EXECUTED\n📊 15M SCAN\n⏰ {now}\n\n🔥 STOCKS:\n" + "\n".join(all_results)
@@ -136,22 +135,38 @@ def scan_market():
 
     asyncio.run(send_telegram(msg))
 
+# ================= KEEP ALIVE (SILENT) =================
+def keep_alive():
+    url = os.environ.get("RENDER_URL")
+
+    if not url:
+        print("⚠️ RENDER_URL not set")
+        return
+
+    while True:
+        try:
+            requests.get(url, timeout=10)
+        except:
+            pass
+
+        time.sleep(300)  # 5 min
+
 # ================= LOOP =================
 def run_loop():
     global last_run_key
 
     print("🚀 Loop Started")
 
-    ist = pytz.timezone("Asia/Kolkata")
+    ist = pytz.timezone('Asia/Kolkata')
 
     while True:
         now = datetime.datetime.now(ist)
         current_time = now.time()
 
-        # market hours only: 09:15 to 15:30
+        # market hours: 9:15 to 15:30
         if datetime.time(9, 15) <= current_time <= datetime.time(15, 30):
 
-            # exact scan times: 09:31, 09:46, 10:01...
+            # trigger at 09:31, 09:46, 10:01...
             if now.minute % 15 == 1:
                 key = now.strftime("%Y-%m-%d %H:%M")
 
@@ -163,7 +178,7 @@ def run_loop():
         time.sleep(5)
 
 # ================= FLASK =================
-@app.route("/")
+@app.route('/')
 def home():
     return "Bot Running ✅"
 
@@ -173,12 +188,17 @@ if __name__ == "__main__":
 
     asyncio.run(send_telegram("🚀 BOT STARTED"))
 
-    # immediate startup scan
-    scan_market()
+    scan_market()  # immediate scan
 
-    t = threading.Thread(target=run_loop)
-    t.daemon = True
-    t.start()
+    # start scan loop
+    t1 = threading.Thread(target=run_loop)
+    t1.daemon = True
+    t1.start()
+
+    # start silent ping loop
+    t2 = threading.Thread(target=keep_alive)
+    t2.daemon = True
+    t2.start()
 
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
