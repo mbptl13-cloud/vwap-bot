@@ -15,7 +15,7 @@ bot = Bot(token=TOKEN)
 import asyncio
 
 async def send(msg):
-    await bot.send_message(chat_id=CHAT_ID, text=msg)
+    await asyncio.run(send_telegram(msg))
 
 asyncio.run(send("Hello"))
 
