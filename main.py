@@ -12,6 +12,12 @@ TOKEN = "8695622015:AAGQvyaYVoI6ZGZf4qt2D-pdXeFutLKNL80"
 CHAT_ID = "309248606"
 
 bot = Bot(token=TOKEN)
+import asyncio
+
+async def send(msg):
+    await bot.send_message(chat_id=CHAT_ID, text=msg)
+
+asyncio.run(send("Hello"))
 
 # NSE FNO STOCK LIST (sample - you can expand)
 FNO_STOCKS = [
