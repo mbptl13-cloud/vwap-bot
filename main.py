@@ -67,57 +67,32 @@ def login():
 
 # ================= NSE TOKEN FETCH =================
 def get_fno_tokens():
-    print("🔄 Fetching FNO + Tokens...")
+    print("🔄 Fetching FNO + Tokens (STABLE MODE)...")
+
+    url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
 
     headers = {
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "application/json,text/plain,*/*",
-        "Referer": "https://www.nseindia.com"
+        "User-Agent": "Mozilla/5.0"
     }
 
-    session = requests.Session()
-
-    # 🔥 NSE WARMUP (IMPORTANT FIX)
     try:
-        session.get("https://www.nseindia.com", headers=headers, timeout=10)
-    except:
-        pass
-
-    # ================= FNO LIST =================
-    url = "https://www.nseindia.com/api/derivatives/equity-stockIndices"
-    data = safe_json(session, url, headers)
-
-    if not data:
-        print("❌ FNO API failed")
-        return {}
-
-    fno = set()
-    for x in data.get("data", []):
-        if x.get("symbol"):
-            fno.add(x["symbol"])
-
-    # ================= TOKEN MASTER =================
-    url2 = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
-    inst = safe_json(session, url2, headers)
-
-    if not inst:
-        print("❌ Token API failed")
+        data = requests.get(url, headers=headers, timeout=20).json()
+    except Exception as e:
+        print("❌ Token master failed:", e)
         return {}
 
     tokens = {}
 
-    for i in inst:
+    for i in data:
         try:
             if i.get("exch_seg") == "NSE" and i.get("symbol", "").endswith("-EQ"):
                 name = i["symbol"].replace("-EQ", "")
-                if name in fno:
-                    tokens[name] = i["token"]
+                tokens[name] = i["token"]
         except:
             continue
 
     print(f"✅ Tokens Loaded: {len(tokens)}")
     return tokens
-
 
 # ================= REFRESH TOKENS =================
 def refresh_tokens():
