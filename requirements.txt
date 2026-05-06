@@ -4,3 +4,4 @@ pyotp
 flask
 python-telegram-bot==20.3
 smartapi-python
+logzero
