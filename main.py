@@ -20,12 +20,16 @@ app = Flask(__name__)
 
 # ================= LOGIN =================
 def login():
+    print("🔐 Logging in...")
+
     obj = SmartConnect(api_key=API_KEY)
     totp = pyotp.TOTP(TOTP_SECRET).now()
-    obj.generateSession(CLIENT_ID, PASSWORD, totp)
-    return obj, obj.getfeedToken()
 
-angel, FEED_TOKEN = login()
+    data = obj.generateSession(CLIENT_ID, PASSWORD, totp)
+
+    print("LOGIN RESPONSE:", data)
+
+    return obj, obj.getfeedToken()
 
 # ================= AUTO TOKEN FETCH =================
 def get_fno_tokens():
@@ -262,11 +266,23 @@ def webhook():
 
 # ================= MAIN =================
 if __name__ == "__main__":
-    print("🚀 START")
 
-    threading.Thread(target=socket, daemon=True).start()
-    threading.Thread(target=loop, daemon=True).start()
-    threading.Thread(target=refresh_tokens, daemon=True).start()
+    print("🚀 BOT STARTING...")
 
-    port = int(os.environ.get("PORT",10000))
-    app.run(host="0.0.0.0", port=port)
+    try:
+        # LOGIN FIRST
+        angel, FEED_TOKEN = login()
+        print("✅ LOGIN SUCCESS")
+
+        # START THREADS ONLY AFTER LOGIN
+        threading.Thread(target=socket, daemon=True).start()
+        threading.Thread(target=loop, daemon=True).start()
+        threading.Thread(target=refresh_tokens, daemon=True).start()
+
+        print("🔌 SYSTEM RUNNING")
+
+        port = int(os.environ.get("PORT", 10000))
+        app.run(host="0.0.0.0", port=port)
+
+    except Exception as e:
+        print("❌ CRASH ERROR:", str(e))
