@@ -2,6 +2,8 @@ pandas
 pytz
 pyotp
 flask
+requests
 python-telegram-bot==20.3
 smartapi-python
 logzero
+websocket-client
