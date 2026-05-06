@@ -15,45 +15,16 @@ from flask import Flask
 TOKEN = "8695622015:AAGQvyaYVoI6ZGZf4qt2D-pdXeFutLKNL80"
 CHAT_ID = 309248606
 
-BATCH_WORKERS = 6      # parallel batches
-STOCK_WORKERS = 5      # threads inside each batch
+BATCH_WORKERS = 6
+STOCK_WORKERS = 5
 
 bot = Bot(token=TOKEN)
 app = Flask(__name__)
 
 last_run_key = None
 
-# ================= TELEGRAM =================
-async def send_telegram(msg):
-    try:
-        await bot.send_message(chat_id=CHAT_ID, text=msg)
-    except Exception as e:
-        print("Telegram Error:", e)
-
-# ================= STRATEGY =================
-def check_conditions(df):
-    try:
-        df = df.copy()
-
-        df['vwap'] = (df['Volume'] * (df['High'] + df['Low'] + df['Close'])/3).cumsum() / df['Volume'].cumsum()
-        df['vol_sma20'] = df['Volume'].rolling(20).mean()
-
-        last = df.iloc[-1]
-
-        return (
-            last['Volume'] > 500000 and
-            (last['Close'] * last['Volume']) > 150000000 and
-            ((last['High'] - last['Low']) / last['Open'] * 100) > 1 and
-            (abs(last['Close'] - last['Open']) / last['Open'] * 100) > 0.6 and
-            last['Close'] > last['vwap'] and
-            last['Volume'] > (last['vol_sma20'] * 2) and
-            last['Close'] > last['Open']
-        )
-    except:
-        return False
-
-# ================= FULL STOCK LIST =================
-FNO_STOCKS = [
+# ================= YOUR STOCK LIST =================
+FNO_STOCKS = FNO_STOCKS = [
 "360ONE.NS","ABB.NS","APLAPOLLO.NS","AUBANK.NS","ADANIENSOL.NS","ADANIENT.NS","ADANIGREEN.NS","ADANIPORTS.NS","ADANIPOWER.NS","ABCAPITAL.NS","ALKEM.NS","AMBER.NS","AMBUJACEM.NS","ANGELONE.NS","APOLLOHOSP.NS","ASHOKLEY.NS","ASIANPAINT.NS","ASTRAL.NS","AUROPHARMA.NS","DMART.NS",
 
 "AXISBANK.NS","BSE.NS","BAJAJ-AUTO.NS","BAJFINANCE.NS","BAJAJFINSV.NS","BAJAJHLDNG.NS","BANDHANBNK.NS","BANKBARODA.NS","BANKINDIA.NS","BDL.NS","BEL.NS","BHARATFORG.NS","BHEL.NS","BPCL.NS","BHARTIARTL.NS","BIOCON.NS","BLUESTARCO.NS","BOSCHLTD.NS","BRITANNIA.NS","CGPOWER.NS",
@@ -77,14 +48,44 @@ FNO_STOCKS = [
 "UPL.NS","ULTRACEMCO.NS","UNIONBANK.NS","UNITDSPR.NS","VBL.NS","VEDL.NS","VMM.NS","IDEA.NS","VOLTAS.NS","WAAREEENER.NS","WIPRO.NS","YESBANK.NS","ZYDUSLIFE.NS"
 ]
 
-# ================= SPLIT INTO BATCHES =================
+# ================= TELEGRAM =================
+async def send_telegram(msg):
+    try:
+        await bot.send_message(chat_id=CHAT_ID, text=msg)
+        print("📤", msg)
+    except Exception as e:
+        print("Telegram Error:", e)
+
+# ================= STRATEGY =================
+def check_conditions(df):
+    try:
+        df = df.copy()
+        df["vwap"] = (
+            (df["Volume"] * (df["High"] + df["Low"] + df["Close"]) / 3).cumsum()
+            / df["Volume"].cumsum()
+        )
+        df["vol_sma20"] = df["Volume"].rolling(20).mean()
+
+        last = df.iloc[-1]
+
+        return (
+            last["Volume"] > 500000
+            and (last["Close"] * last["Volume"]) > 150000000
+            and ((last["High"] - last["Low"]) / last["Open"] * 100) > 1
+            and (abs(last["Close"] - last["Open"]) / last["Open"] * 100) > 0.6
+            and last["Close"] > last["vwap"]
+            and last["Volume"] > (last["vol_sma20"] * 2)
+            and last["Close"] > last["Open"]
+        )
+    except:
+        return False
+
+# ================= BATCH =================
 def create_batches(lst, n):
     k, m = divmod(len(lst), n)
     return [lst[i*k + min(i, m):(i+1)*k + min(i+1, m)] for i in range(n)]
 
-BATCHES = create_batches(FNO_STOCKS, 6)
-
-# ================= PROCESS SINGLE STOCK =================
+# ================= PROCESS =================
 def process_stock(stock):
     try:
         df = yf.download(stock, interval="15m", period="3d", progress=False)
@@ -93,14 +94,13 @@ def process_stock(stock):
             return None
 
         if check_conditions(df):
-            return stock.replace(".NS","")
+            return stock.replace(".NS", "")
 
     except Exception as e:
         print(stock, e)
 
     return None
 
-# ================= PROCESS ONE BATCH =================
 def process_batch(batch):
     results = []
 
@@ -114,25 +114,25 @@ def process_batch(batch):
 
     return results
 
-# ================= MAIN SCAN =================
+# ================= SCAN =================
 def scan_market():
-    print("⚡ Ultra Fast Scan Running...")
+    print("✅ SCAN EXECUTED")
 
+    batches = create_batches(FNO_STOCKS, BATCH_WORKERS)
     all_results = []
 
     with ThreadPoolExecutor(max_workers=BATCH_WORKERS) as executor:
-        futures = [executor.submit(process_batch, batch) for batch in BATCHES]
+        futures = [executor.submit(process_batch, batch) for batch in batches]
 
         for future in as_completed(futures):
-            batch_result = future.result()
-            all_results.extend(batch_result)
+            all_results.extend(future.result())
 
-    now = datetime.datetime.now(pytz.timezone('Asia/Kolkata')).strftime("%H:%M")
+    now = datetime.datetime.now(pytz.timezone("Asia/Kolkata")).strftime("%H:%M")
 
     if all_results:
-        msg = f"⏰ {now}\n🔥 STOCKS:\n" + "\n".join(all_results)
+        msg = f"✅ SCAN EXECUTED\n📊 15M SCAN\n⏰ {now}\n\n🔥 STOCKS:\n" + "\n".join(all_results)
     else:
-        msg = f"⏰ {now}\n❌ NO STOCK"
+        msg = f"✅ SCAN EXECUTED\n📊 15M SCAN\n⏰ {now}\n\n❌ NO STOCK"
 
     asyncio.run(send_telegram(msg))
 
@@ -140,30 +140,41 @@ def scan_market():
 def run_loop():
     global last_run_key
 
-    ist = pytz.timezone('Asia/Kolkata')
+    print("🚀 Loop Started")
+
+    ist = pytz.timezone("Asia/Kolkata")
 
     while True:
         now = datetime.datetime.now(ist)
+        current_time = now.time()
 
-        if now.minute % 15 == 1 and now.second < 10:
-            key = now.strftime("%H:%M")
+        # market hours only: 09:15 to 15:30
+        if datetime.time(9, 15) <= current_time <= datetime.time(15, 30):
 
-            if key != last_run_key:
-                last_run_key = key
-                scan_market()
+            # exact scan times: 09:31, 09:46, 10:01...
+            if now.minute % 15 == 1:
+                key = now.strftime("%Y-%m-%d %H:%M")
+
+                if key != last_run_key:
+                    last_run_key = key
+                    print(f"⏰ Trigger {key}")
+                    scan_market()
 
         time.sleep(5)
 
 # ================= FLASK =================
-@app.route('/')
+@app.route("/")
 def home():
     return "Bot Running ✅"
 
 # ================= MAIN =================
 if __name__ == "__main__":
+    print("🔥 Starting Bot")
+
     asyncio.run(send_telegram("🚀 BOT STARTED"))
 
-    scan_market()  # immediate run
+    # immediate startup scan
+    scan_market()
 
     t = threading.Thread(target=run_loop)
     t.daemon = True
