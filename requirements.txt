@@ -1,7 +1,6 @@
-python-telegram-bot==21.6
-pandas
+python-telegram-bot==13.15
 yfinance
-requests
-httpx==0.27.2
-Flask
-gunicorn
+pandas
+numpy
+schedule
+pytz
