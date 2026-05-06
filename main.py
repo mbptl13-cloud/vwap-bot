@@ -4,7 +4,6 @@ import pyotp
 from SmartApi import SmartConnect
 from SmartApi.smartWebSocketV2 import SmartWebSocketV2
 from telegram import Bot
-from telegram.ext import Updater
 from flask import Flask, request
 
 # ================= CONFIG =================
@@ -19,6 +18,37 @@ CHAT_ID = 309248606
 bot = Bot(token=TOKEN)
 app = Flask(__name__)
 
+# ================= GLOBAL =================
+TOKENS = {}
+FEED_TOKEN = None
+
+# ================= SAFE REQUEST =================
+def safe_json(session, url, headers, retries=3):
+    for i in range(retries):
+        try:
+            r = session.get(url, headers=headers, timeout=10)
+
+            if r.status_code != 200:
+                print("❌ HTTP:", r.status_code)
+                time.sleep(1)
+                continue
+
+            text = r.text.strip()
+
+            if not text or text.startswith("<"):
+                print("❌ Blocked/HTML response")
+                time.sleep(1)
+                continue
+
+            return r.json()
+
+        except Exception as e:
+            print("❌ JSON error:", e)
+            time.sleep(1)
+
+    return None
+
+
 # ================= LOGIN =================
 def login():
     print("🔐 Logging in...")
@@ -30,54 +60,87 @@ def login():
 
     print("LOGIN RESPONSE:", data)
 
-    return obj, obj.getfeedToken()
+    feed_token = data["data"]["feedToken"]
 
-# ================= AUTO TOKEN FETCH =================
+    return obj, feed_token
+
+
+# ================= NSE TOKEN FETCH =================
 def get_fno_tokens():
     print("🔄 Fetching FNO + Tokens...")
 
-    headers = {"User-Agent": "Mozilla/5.0"}
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Accept": "application/json,text/plain,*/*",
+        "Referer": "https://www.nseindia.com"
+    }
+
     session = requests.Session()
-    session.get("https://www.nseindia.com", headers=headers)
 
+    # 🔥 NSE WARMUP (IMPORTANT FIX)
+    try:
+        session.get("https://www.nseindia.com", headers=headers, timeout=10)
+    except:
+        pass
+
+    # ================= FNO LIST =================
     url = "https://www.nseindia.com/api/derivatives/equity-stockIndices"
-    data = session.get(url, headers=headers).json()
+    data = safe_json(session, url, headers)
 
-    fno = set([x["symbol"] for x in data["data"]])
+    if not data:
+        print("❌ FNO API failed")
+        return {}
 
+    fno = set()
+    for x in data.get("data", []):
+        if x.get("symbol"):
+            fno.add(x["symbol"])
+
+    # ================= TOKEN MASTER =================
     url2 = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
-    inst = requests.get(url2).json()
+    inst = safe_json(session, url2, headers)
+
+    if not inst:
+        print("❌ Token API failed")
+        return {}
 
     tokens = {}
+
     for i in inst:
-        if i["exch_seg"] == "NSE" and i["symbol"].endswith("-EQ"):
-            name = i["symbol"].replace("-EQ", "")
-            if name in fno:
-                tokens[name] = i["token"]
+        try:
+            if i.get("exch_seg") == "NSE" and i.get("symbol", "").endswith("-EQ"):
+                name = i["symbol"].replace("-EQ", "")
+                if name in fno:
+                    tokens[name] = i["token"]
+        except:
+            continue
 
     print(f"✅ Tokens Loaded: {len(tokens)}")
     return tokens
 
-TOKENS = get_fno_tokens()
 
-# ================= DAILY REFRESH =================
+# ================= REFRESH TOKENS =================
 def refresh_tokens():
     global TOKENS
     ist = pytz.timezone("Asia/Kolkata")
 
     while True:
         now = datetime.datetime.now(ist)
+
         if now.hour == 8 and now.minute == 45:
             TOKENS = get_fno_tokens()
             print("🔁 TOKENS UPDATED")
             time.sleep(60)
+
         time.sleep(20)
+
 
 # ================= STORAGE =================
 candles_15m = {}
 candles_5m = {}
 active_radar = {}
 trades = {}
+
 
 # ================= TELEGRAM =================
 async def send(msg):
@@ -86,37 +149,49 @@ async def send(msg):
     except:
         pass
 
+
 # ================= VWAP =================
 def vwap(df):
-    df["tp"] = (df["high"]+df["low"]+df["close"])/3
+    df["tp"] = (df["high"] + df["low"] + df["close"]) / 3
     df["cv"] = df["volume"].cumsum()
-    df["cpv"] = (df["tp"]*df["volume"]).cumsum()
-    df["vwap"] = df["cpv"]/df["cv"]
+    df["cpv"] = (df["tp"] * df["volume"]).cumsum()
+    df["vwap"] = df["cpv"] / df["cv"]
     return df
 
-# ================= CANDLE =================
+
+# ================= CANDLE UPDATE =================
 def update(symbol, price):
     now = datetime.datetime.now(pytz.timezone("Asia/Kolkata"))
 
-    t15 = now.replace(minute=(now.minute//15)*15, second=0, microsecond=0)
-    t5 = now.replace(minute=(now.minute//5)*5, second=0, microsecond=0)
+    t15 = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
+    t5 = now.replace(minute=(now.minute // 5) * 5, second=0, microsecond=0)
 
-    for tf, store, t in [(15, candles_15m, t15),(5, candles_5m, t5)]:
+    for tf, store, t in [(15, candles_15m, t15), (5, candles_5m, t5)]:
         store.setdefault(symbol, [])
+
         if not store[symbol] or store[symbol][-1]["time"] != t:
-            store[symbol].append({"time":t,"open":price,"high":price,"low":price,"close":price,"volume":1})
+            store[symbol].append({
+                "time": t,
+                "open": price,
+                "high": price,
+                "low": price,
+                "close": price,
+                "volume": 1
+            })
         else:
             c = store[symbol][-1]
-            c["high"]=max(c["high"],price)
-            c["low"]=min(c["low"],price)
-            c["close"]=price
-            c["volume"]+=1
+            c["high"] = max(c["high"], price)
+            c["low"] = min(c["low"], price)
+            c["close"] = price
+            c["volume"] += 1
 
-# ================= BATCH SCAN =================
-def process_batch(symbols):
-    for sym in symbols:
+
+# ================= RADAR =================
+def radar():
+    for sym in candles_15m:
         df = pd.DataFrame(candles_15m.get(sym, []))
-        if len(df) < 5: continue
+        if len(df) < 5:
+            continue
 
         df = vwap(df)
         last = df.iloc[-1]
@@ -128,56 +203,47 @@ def process_batch(symbols):
                 "low": last["low"]
             }
 
-# ================= RADAR =================
-def radar():
-    symbols = list(candles_15m.keys())
-    batch_size = 20
-
-    threads = []
-    for i in range(0, len(symbols), batch_size):
-        batch = symbols[i:i+batch_size]
-        t = threading.Thread(target=process_batch, args=(batch,))
-        t.start()
-        threads.append(t)
-
-    for t in threads:
-        t.join()
 
 # ================= ENTRY =================
 def entry():
     now = datetime.datetime.now(pytz.timezone("Asia/Kolkata"))
 
-    if not (datetime.time(9,45)<=now.time()<=datetime.time(13,30)):
+    if not (datetime.time(9, 45) <= now.time() <= datetime.time(13, 30)):
         return
 
     for sym in active_radar:
-        if sym in trades: continue
+        if sym in trades:
+            continue
 
         df = pd.DataFrame(candles_5m.get(sym, []))
-        if len(df) < 10: continue
+        if len(df) < 10:
+            continue
 
         df = vwap(df)
         last, prev = df.iloc[-1], df.iloc[-2]
         r = active_radar[sym]
 
-        if last["close"] > last["vwap"] and prev["low"] <= prev["vwap"]*1.002:
+        if last["close"] > last["vwap"]:
             trades[sym] = {
                 "date": now.strftime("%Y-%m-%d"),
                 "radar": r["time"].strftime("%H:%M"),
                 "entry": now.strftime("%H:%M"),
                 "entry_price": last["close"],
-                "sl": min(prev["low"], r["low"]),
-                "tgt": last["close"] + (last["close"] - min(prev["low"], r["low"])),
+                "sl": prev["low"],
+                "tgt": last["close"] + (last["close"] - prev["low"]),
                 "status": "OPEN"
             }
 
+
 # ================= RESULT =================
 def result():
-    for sym,t in trades.items():
-        if t["status"] != "OPEN": continue
+    for sym, t in trades.items():
+        if t["status"] != "OPEN":
+            continue
 
         df = pd.DataFrame(candles_5m.get(sym, []))
-        if len(df) < 1: continue
+        if len(df) < 1:
+            continue
 
         last = df.iloc[-1]
 
@@ -186,31 +252,16 @@ def result():
         elif last["high"] >= t["tgt"]:
             t["status"] = "WIN"
 
-# ================= REPORT =================
-def report():
-    out = []
-    for sym,t in trades.items():
-        out.append(f"""
-DATE - {t['date']}
-STOCK - {sym}
-RADAR - {t['radar']}
-ENTRY - {t['entry']}
-ENTRY PRICE - {round(t['entry_price'],2)}
-SL - {round(t['sl'],2)}
-TGT - {round(t['tgt'],2)}
-RESULT - {t['status']}
-""")
-    return "\n".join(out) if out else "NO DATA"
 
 # ================= LOOP =================
 def loop():
-    last = None
     ist = pytz.timezone("Asia/Kolkata")
+    last = None
 
     while True:
         now = datetime.datetime.now(ist)
 
-        if datetime.time(9,15)<=now.time()<=datetime.time(15,30):
+        if datetime.time(9, 15) <= now.time() <= datetime.time(15, 30):
 
             if now.minute % 15 == 1:
                 key = now.strftime("%H:%M")
@@ -223,41 +274,44 @@ def loop():
 
         time.sleep(3)
 
+
 # ================= SOCKET =================
 def socket():
     sws = SmartWebSocketV2(API_KEY, CLIENT_ID, FEED_TOKEN)
 
     tokens = list(TOKENS.values())
-    batch_size = 50
 
     def on_open(ws):
         print("🔌 Connected")
 
-        for i in range(0, len(tokens), batch_size):
-            sub = [{"exchangeType":1, "tokens":tokens[i:i+batch_size]}]
-            sws.subscribe(sub)
-            time.sleep(0.5)
+        for t in tokens:
+            sws.subscribe([{"exchangeType": 1, "tokens": [t]}])
+            time.sleep(0.2)
 
     def on_data(ws, msg):
-        token = msg.get("token")
-        price = msg.get("last_traded_price",0)/100
+        try:
+            token = msg.get("token")
+            price = msg.get("last_traded_price", 0) / 100
 
-        for sym,tok in TOKENS.items():
-            if tok == token:
-                update(sym, price)
+            for sym, tok in TOKENS.items():
+                if tok == token:
+                    update(sym, price)
+        except:
+            pass
 
     sws.on_open = on_open
     sws.on_data = on_data
     sws.connect()
 
-# ================= TELEGRAM =================
+
+# ================= TELEGRAM WEBHOOK =================
 @app.route("/", methods=["POST"])
 def webhook():
     text = request.json["message"]["text"]
 
     if text == "LIVE":
-        msg = report()
-    elif text == "LIVE RADAR":
+        msg = str(trades)
+    elif text == "RADAR":
         msg = str(active_radar)
     else:
         msg = "INVALID"
@@ -265,17 +319,18 @@ def webhook():
     asyncio.run(send(msg))
     return "ok"
 
+
 # ================= MAIN =================
 if __name__ == "__main__":
 
     print("🚀 BOT STARTING...")
 
     try:
-        # LOGIN FIRST
         angel, FEED_TOKEN = login()
         print("✅ LOGIN SUCCESS")
 
-        # START THREADS ONLY AFTER LOGIN
+        TOKENS = get_fno_tokens()
+
         threading.Thread(target=socket, daemon=True).start()
         threading.Thread(target=loop, daemon=True).start()
         threading.Thread(target=refresh_tokens, daemon=True).start()
@@ -286,4 +341,4 @@ if __name__ == "__main__":
         app.run(host="0.0.0.0", port=port)
 
     except Exception as e:
-        print("❌ CRASH ERROR:", str(e))
+        print("❌ CRASH:", e)
