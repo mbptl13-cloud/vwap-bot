@@ -3,7 +3,9 @@ pytz
 pyotp
 flask
 requests
-python-telegram-bot==20.3
 smartapi-python
 logzero
 websocket-client
+python-telegram-bot==13.15
+httpx==0.24.1
+httpcore==0.17.3
