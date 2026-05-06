@@ -255,6 +255,8 @@ def loop():
 def socket():
     global FEED_TOKEN, JWT
 
+    batch_size = 75  # IMPORTANT FIX (reduce load)
+
     while True:
         try:
             sws = SmartWebSocketV2(API_KEY, CLIENT_ID, FEED_TOKEN, JWT)
@@ -264,12 +266,14 @@ def socket():
             def on_open(ws):
                 print("🔌 Connected")
 
-                batch_size = 50
                 for i in range(0, len(tokens), batch_size):
+                    batch = tokens[i:i+batch_size]
+
                     sws.subscribe([
-                        {"exchangeType": 1, "tokens": tokens[i:i+batch_size]}
+                        {"exchangeType": 1, "tokens": batch}
                     ])
-                    time.sleep(0.2)
+
+                    time.sleep(0.3)  # IMPORTANT throttle
 
             def on_data(ws, msg):
                 try:
@@ -282,13 +286,21 @@ def socket():
                 except:
                     pass
 
+            def on_error(ws, error):
+                print("❌ WS Error:", error)
+
+            def on_close(ws):
+                print("⚠️ WS Closed → reconnecting...")
+
             sws.on_open = on_open
             sws.on_data = on_data
+            sws.on_error = on_error
+            sws.on_close = on_close
 
             sws.connect()
 
         except Exception as e:
-            print("❌ Socket crashed, reconnecting...", e)
+            print("❌ Socket crashed → retry in 5 sec:", e)
             time.sleep(5)
 
 # ================= TELEGRAM WEBHOOK =================
