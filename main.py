@@ -15,19 +15,20 @@ from flask import Flask
 # ================= CONFIG =================
 TOKEN = "8695622015:AAGQvyaYVoI6ZGZf4qt2D-pdXeFutLKNL80"
 CHAT_ID = 309248606
-MAX_WORKERS = 5
+MAX_WORKERS = 8
 
 bot = Bot(token=TOKEN)
 app = Flask(__name__)
 
+# store last scan
+last_scan = {}
+
 # ================= TELEGRAM =================
 async def send_telegram(msg):
     try:
-        print("📤 Sending:", msg)
         await bot.send_message(chat_id=CHAT_ID, text=msg)
-        print("✅ Sent")
     except Exception as e:
-        print("❌ Telegram Error:", e)
+        print("Telegram Error:", e)
 
 # ================= STRATEGY =================
 def check_conditions(df):
@@ -51,33 +52,71 @@ def check_conditions(df):
     except:
         return False
 
+# ================= WORKER =================
+def process_stock(stock):
+    try:
+        df = yf.download(stock, interval="15m", period="3d", progress=False)
+
+        if len(df) < 30:
+            return None, None
+
+        if check_conditions(df):
+            candle_time = df.index[-1].strftime("%H:%M")
+            return stock.replace(".NS",""), candle_time
+
+    except Exception as e:
+        print(stock, e)
+
+    return None, None
+
 # ================= SCAN =================
 def scan_market():
-    print("🔍 Running scan...")
+    global last_scan
 
-    FNO_STOCKS = ["RELIANCE.NS","SBIN.NS","BHEL.NS"]
+    ist = pytz.timezone('Asia/Kolkata')
+    now = datetime.datetime.now(ist)
 
-    results = []
+    scan_time = now.strftime("%H:%M")
+    date_str = now.strftime("%Y-%m-%d")
 
-    for stock in FNO_STOCKS:
-        try:
-            df = yf.download(stock, interval="15m", period="3d", progress=False)
+    print(f"🔍 Scan at {scan_time}")
 
-            if len(df) < 30:
-                continue
+    FNO_STOCKS = [
+        "RELIANCE.NS","SBIN.NS","BHEL.NS","HDFCBANK.NS",
+        "ICICIBANK.NS","INFY.NS","TCS.NS","LT.NS"
+    ]
 
-            if check_conditions(df):
-                results.append(stock)
+    current_scan = {}
 
-        except Exception as e:
-            print(stock, e)
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        futures = [executor.submit(process_stock, s) for s in FNO_STOCKS]
 
-    now = datetime.datetime.now(pytz.timezone('Asia/Kolkata')).strftime("%H:%M")
+        for future in as_completed(futures):
+            stock, candle = future.result()
+            if stock:
+                if candle not in current_scan:
+                    current_scan[candle] = []
+                current_scan[candle].append(stock)
 
-    if results:
-        msg = f"⏰ {now}\n✅ STOCKS:\n" + "\n".join(results)
+    # ===== BUILD MESSAGE =====
+    msg = f"📊 15M SCAN REPORT\n\n"
+    msg += f"⏰ Scan Time: {scan_time}\n"
+    msg += f"📅 Date: {date_str}\n\n"
+
+    all_times = set(last_scan.keys()).union(set(current_scan.keys()))
+
+    if not all_times:
+        msg += "❌ NO STOCK\n"
     else:
-        msg = f"⏰ {now}\n❌ NO STOCK"
+        for t in sorted(all_times):
+            stocks = current_scan.get(t, [])
+            if stocks:
+                msg += f"🕒 {t} → {', '.join(stocks)}\n"
+            else:
+                msg += f"🕒 {t} → NO STOCK\n"
+
+    # update last scan
+    last_scan = current_scan.copy()
 
     asyncio.run(send_telegram(msg))
 
@@ -85,8 +124,12 @@ def scan_market():
 def run_scheduler():
     print("🚀 Scheduler started")
 
-    # DEBUG MODE (every 1 min)
-    schedule.every(1).minutes.do(scan_market)
+    start = datetime.datetime.strptime("09:31", "%H:%M")
+    end = datetime.datetime.strptime("15:16", "%H:%M")
+
+    while start <= end:
+        schedule.every().day.at(start.strftime("%H:%M")).do(scan_market)
+        start += datetime.timedelta(minutes=15)
 
     while True:
         schedule.run_pending()
@@ -101,17 +144,14 @@ def home():
 if __name__ == "__main__":
     print("🔥 Bot Starting...")
 
-    # send startup message
     asyncio.run(send_telegram("🚀 BOT STARTED"))
 
-    # FORCE FIRST SCAN (important fix)
+    # first scan immediately
     scan_market()
 
-    # start scheduler properly
     t = threading.Thread(target=run_scheduler)
     t.daemon = True
     t.start()
 
-    # run flask
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
