@@ -4,6 +4,7 @@ import pyotp
 from SmartApi import SmartConnect
 from SmartApi.smartWebSocketV2 import SmartWebSocketV2
 from telegram import Bot
+from telegram.ext import Updater
 from flask import Flask, request
 
 # ================= CONFIG =================
