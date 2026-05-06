@@ -1,7 +1,6 @@
 import yfinance as yf
 import pandas as pd
 import numpy as np
-import schedule
 import time
 import datetime
 import pytz
@@ -20,7 +19,8 @@ MAX_WORKERS = 8
 bot = Bot(token=TOKEN)
 app = Flask(__name__)
 
-# store last scan
+# track last run minute to avoid duplicate triggers
+last_run_key = None
 last_scan = {}
 
 # ================= TELEGRAM =================
@@ -69,6 +69,18 @@ def process_stock(stock):
 
     return None, None
 
+# ================= TIME HELPER =================
+def get_last_closed_candle(now):
+    # round down to nearest 15-min candle
+    minute = (now.minute // 15) * 15
+    candle = now.replace(minute=minute, second=0, microsecond=0)
+
+    # if exactly on boundary, go back one candle
+    if now.minute % 15 == 0:
+        candle -= datetime.timedelta(minutes=15)
+
+    return candle.strftime("%H:%M")
+
 # ================= SCAN =================
 def scan_market():
     global last_scan
@@ -78,8 +90,9 @@ def scan_market():
 
     scan_time = now.strftime("%H:%M")
     date_str = now.strftime("%Y-%m-%d")
+    candle_ref = get_last_closed_candle(now)
 
-    print(f"🔍 Scan at {scan_time}")
+    print(f"🔍 Scan at {scan_time} | Candle {candle_ref}")
 
     FNO_STOCKS = [
         "RELIANCE.NS","SBIN.NS","BHEL.NS","HDFCBANK.NS",
@@ -106,7 +119,7 @@ def scan_market():
     all_times = set(last_scan.keys()).union(set(current_scan.keys()))
 
     if not all_times:
-        msg += "❌ NO STOCK\n"
+        msg += f"🕒 {candle_ref} → NO STOCK\n"
     else:
         for t in sorted(all_times):
             stocks = current_scan.get(t, [])
@@ -115,25 +128,30 @@ def scan_market():
             else:
                 msg += f"🕒 {t} → NO STOCK\n"
 
-    # update last scan
     last_scan = current_scan.copy()
 
     asyncio.run(send_telegram(msg))
 
-# ================= SCHEDULER =================
-def run_scheduler():
-    print("🚀 Scheduler started")
+# ================= ROBUST LOOP =================
+def run_loop():
+    global last_run_key
 
-    start = datetime.datetime.strptime("09:31", "%H:%M")
-    end = datetime.datetime.strptime("15:16", "%H:%M")
+    print("🚀 Loop Started")
 
-    while start <= end:
-        schedule.every().day.at(start.strftime("%H:%M")).do(scan_market)
-        start += datetime.timedelta(minutes=15)
+    ist = pytz.timezone('Asia/Kolkata')
 
     while True:
-        schedule.run_pending()
-        time.sleep(1)
+        now = datetime.datetime.now(ist)
+
+        # trigger at 09:31, 09:46, 10:01 ...
+        if now.minute % 15 == 1 and now.second < 10:
+            key = now.strftime("%H:%M")
+
+            if key != last_run_key:
+                last_run_key = key
+                scan_market()
+
+        time.sleep(5)
 
 # ================= FLASK =================
 @app.route('/')
@@ -146,10 +164,10 @@ if __name__ == "__main__":
 
     asyncio.run(send_telegram("🚀 BOT STARTED"))
 
-    # first scan immediately
+    # immediate scan (so you don't wait)
     scan_market()
 
-    t = threading.Thread(target=run_scheduler)
+    t = threading.Thread(target=run_loop)
     t.daemon = True
     t.start()
 
