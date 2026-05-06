@@ -255,40 +255,46 @@ def loop():
 def socket():
     global FEED_TOKEN, JWT
 
-    sws = SmartWebSocketV2(API_KEY, CLIENT_ID, FEED_TOKEN, JWT)
-
-    tokens = list(TOKENS.values())
-
-    def on_open(ws):
-        print("🔌 Connected")
-
-        batch_size = 50
-        for i in range(0, len(tokens), batch_size):
-            sws.subscribe([
-                {"exchangeType": 1, "tokens": tokens[i:i+batch_size]}
-            ])
-            time.sleep(0.3)
-
-    def on_data(ws, msg):
+    while True:
         try:
-            token = msg.get("token")
-            price = msg.get("last_traded_price", 0) / 100
+            sws = SmartWebSocketV2(API_KEY, CLIENT_ID, FEED_TOKEN, JWT)
 
-            for sym, tok in TOKENS.items():
-                if tok == token:
-                    update(sym, price)
-        except:
-            pass
+            tokens = list(TOKENS.values())
 
-    sws.on_open = on_open
-    sws.on_data = on_data
-    sws.connect()
+            def on_open(ws):
+                print("🔌 Connected")
 
+                batch_size = 50
+                for i in range(0, len(tokens), batch_size):
+                    sws.subscribe([
+                        {"exchangeType": 1, "tokens": tokens[i:i+batch_size]}
+                    ])
+                    time.sleep(0.2)
+
+            def on_data(ws, msg):
+                try:
+                    token = msg.get("token")
+                    price = msg.get("last_traded_price", 0) / 100
+
+                    for sym, tok in TOKENS.items():
+                        if tok == token:
+                            update(sym, price)
+                except:
+                    pass
+
+            sws.on_open = on_open
+            sws.on_data = on_data
+
+            sws.connect()
+
+        except Exception as e:
+            print("❌ Socket crashed, reconnecting...", e)
+            time.sleep(5)
 
 # ================= TELEGRAM WEBHOOK =================
-@app.route("/", methods=["POST"])
-def webhook():
-    text = request.json["message"]["text"]
+@app.route("/", methods=["GET"])
+def home():
+    return "BOT RUNNING", 200
 
     if text == "LIVE":
         msg = str(trades)
