@@ -60,9 +60,10 @@ def login():
 
     print("LOGIN RESPONSE:", data)
 
-    feed_token = data["data"]["feedToken"]
+    jwt = data["data"]["jwtToken"]
+    feed = data["data"]["feedToken"]
 
-    return obj, feed_token
+    return obj, feed, jwt
 
 
 # ================= NSE TOKEN FETCH =================
@@ -252,8 +253,7 @@ def loop():
 
 # ================= SOCKET =================
 def socket():
-    sws = SmartWebSocketV2(API_KEY, CLIENT_ID, FEED_TOKEN)
-
+    sws = SmartWebSocketV2(API_KEY, CLIENT_ID, FEED_TOKEN, angel.jwtToken)
     tokens = list(TOKENS.values())
 
     def on_open(ws):
@@ -301,7 +301,8 @@ if __name__ == "__main__":
     print("🚀 BOT STARTING...")
 
     try:
-        angel, FEED_TOKEN = login()
+        def socket():
+            sws = SmartWebSocketV2(API_KEY, CLIENT_ID, FEED_TOKEN, JWT)
         print("✅ LOGIN SUCCESS")
 
         TOKENS = get_fno_tokens()
