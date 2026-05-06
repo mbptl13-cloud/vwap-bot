@@ -14,14 +14,14 @@ from flask import Flask
 # ================= CONFIG =================
 TOKEN = "8695622015:AAGQvyaYVoI6ZGZf4qt2D-pdXeFutLKNL80"
 CHAT_ID = 309248606
-MAX_WORKERS = 8
+
+BATCH_WORKERS = 6      # parallel batches
+STOCK_WORKERS = 5      # threads inside each batch
 
 bot = Bot(token=TOKEN)
 app = Flask(__name__)
 
-# track last run minute to avoid duplicate triggers
 last_run_key = None
-last_scan = {}
 
 # ================= TELEGRAM =================
 async def send_telegram(msg):
@@ -52,98 +52,97 @@ def check_conditions(df):
     except:
         return False
 
-# ================= WORKER =================
+# ================= FULL STOCK LIST =================
+FNO_STOCKS = [ 360ONE.NS, ABB.NS, APLAPOLLO.NS, AUBANK.NS, ADANIENSOL.NS, ADANIENT.NS, ADANIGREEN.NS, ADANIPORTS.NS, ADANIPOWER.NS, ABCAPITAL.NS, ALKEM.NS, AMBER.NS, AMBUJACEM.NS, ANGELONE.NS, APOLLOHOSP.NS, ASHOKLEY.NS, ASIANPAINT.NS, ASTRAL.NS, AUROPHARMA.NS, DMART.NS
+
+AXISBANK.NS, BSE.NS, BAJAJ-AUTO.NS, BAJFINANCE.NS, BAJAJFINSV.NS, BAJAJHLDNG.NS, BANDHANBNK.NS, BANKBARODA.NS, BANKINDIA.NS, BDL.NS, BEL.NS, BHARATFORG.NS, BHEL.NS, BPCL.NS, BHARTIARTL.NS, BIOCON.NS, BLUESTARCO.NS, BOSCHLTD.NS, BRITANNIA.NS, CGPOWER.NS
+
+CANBK.NS, CDSL.NS, CHOLAFIN.NS, CIPLA.NS, COALINDIA.NS, COCHINSHIP.NS, COFORGE.NS, COLPAL.NS, CAMS.NS, CONCOR.NS, CROMPTON.NS, CUMMINSIND.NS, DLF.NS, DABUR.NS, DALBHARAT.NS, DELHIVERY.NS, DIVISLAB.NS, DIXON.NS, DRREDDY.NS, ETERNAL.NS
+
+EICHERMOT.NS, EXIDEIND.NS, FORCEMOT.NS, NYKAA.NS, FORTIS.NS, GAIL.NS, GMRAIRPORT.NS, GLENMARK.NS, GODFRYPHLP.NS, GODREJCP.NS, GODREJPROP.NS, GRASIM.NS, HCLTECH.NS, HDFCAMC.NS, HDFCBANK.NS, HDFCLIFE.NS, HAVELLS.NS, HEROMOTOCO.NS, HINDALCO.NS, HAL.NS
+
+HINDPETRO.NS, HINDUNILVR.NS, HINDZINC.NS, POWERINDIA.NS, HUDCO.NS, HYUNDAI.NS, ICICIBANK.NS, ICICIGI.NS, ICICIPRULI.NS, IDFCFIRSTB.NS, ITC.NS, INDIANB.NS, IEX.NS, IOC.NS, IRFC.NS, IREDA.NS, INDUSTOWER.NS, INDUSINDBK.NS, NAUKRI.NS, INFY.NS
+
+INOXWIND.NS, INDIGO.NS, JINDALSTEL.NS, JSWENERGY.NS, JSWSTEEL.NS, JIOFIN.NS, JUBLFOOD.NS, KEI.NS, KPITTECH.NS, KALYANKJIL.NS, KAYNES.NS, KFINTECH.NS, KOTAKBANK.NS, LTF.NS, LICHSGFIN.NS, LTM.NS, LT.NS, LAURUSLABS.NS, LICI.NS, LODHA.NS
+
+LUPIN.NS, M&M.NS, MANAPPURAM.NS, MANKIND.NS, MARICO.NS, MARUTI.NS, MFSL.NS, MAXHEALTH.NS, MAZDOCK.NS, MOTILALOFS.NS, MPHASIS.NS, MCX.NS, MUTHOOTFIN.NS, NBCC.NS, NHPC.NS, NMDC.NS, NTPC.NS, NATIONALUM.NS, NESTLEIND.NS, NAM-INDIA.NS
+
+NUVAMA.NS, OBEROIRLTY.NS, ONGC.NS, OIL.NS, PAYTM.NS, OFSS.NS, POLICYBZR.NS, PGEL.NS, PIIND.NS, PNBHOUSING.NS, PAGEIND.NS, PATANJALI.NS, PERSISTENT.NS, PETRONET.NS, PIDILITIND.NS, PPLPHARMA.NS, POLYCAB.NS, PFC.NS, POWERGRID.NS, PREMIERENE.NS
+
+PRESTIGE.NS, PNB.NS, RBLBANK.NS, RECLTD.NS, RVNL.NS, RELIANCE.NS, SBICARD.NS, SBILIFE.NS, SHREECEM.NS, SRF.NS, SAMMAANCAP.NS, MOTHERSON.NS, SHRIRAMFIN.NS, SIEMENS.NS, SOLARINDS.NS, SONACOMS.NS, SBIN.NS, SAIL.NS, SUNPHARMA.NS, SUPREMEIND.NS
+
+SUZLON.NS, SWIGGY.NS, TATACONSUM.NS, TVSMOTOR.NS, TCS.NS, TATAELXSI.NS, TMPV.NS, TATAPOWER.NS, TATASTEEL.NS, TATATECH.NS, TECHM.NS, FEDERALBNK.NS, INDHOTEL.NS, PHOENIXLTD.NS, TITAN.NS, TORNTPHARM.NS, TORNTPOWER.NS, TRENT.NS, TIINDIA.NS, UNOMINDA.NS
+
+UPL.NS, ULTRACEMCO.NS, UNIONBANK.NS, UNITDSPR.NS, VBL.NS, VEDL.NS, VMM.NS, IDEA.NS, VOLTAS.NS, WAAREEENER.NS, WIPRO.NS, YESBANK.NS, ZYDUSLIFE.NS]
+
+# ================= SPLIT INTO BATCHES =================
+def create_batches(lst, n):
+    k, m = divmod(len(lst), n)
+    return [lst[i*k + min(i, m):(i+1)*k + min(i+1, m)] for i in range(n)]
+
+BATCHES = create_batches(FNO_STOCKS, 6)
+
+# ================= PROCESS SINGLE STOCK =================
 def process_stock(stock):
     try:
         df = yf.download(stock, interval="15m", period="3d", progress=False)
 
         if len(df) < 30:
-            return None, None
+            return None
 
         if check_conditions(df):
-            candle_time = df.index[-1].strftime("%H:%M")
-            return stock.replace(".NS",""), candle_time
+            return stock.replace(".NS","")
 
     except Exception as e:
         print(stock, e)
 
-    return None, None
+    return None
 
-# ================= TIME HELPER =================
-def get_last_closed_candle(now):
-    # round down to nearest 15-min candle
-    minute = (now.minute // 15) * 15
-    candle = now.replace(minute=minute, second=0, microsecond=0)
+# ================= PROCESS ONE BATCH =================
+def process_batch(batch):
+    results = []
 
-    # if exactly on boundary, go back one candle
-    if now.minute % 15 == 0:
-        candle -= datetime.timedelta(minutes=15)
-
-    return candle.strftime("%H:%M")
-
-# ================= SCAN =================
-def scan_market():
-    global last_scan
-
-    ist = pytz.timezone('Asia/Kolkata')
-    now = datetime.datetime.now(ist)
-
-    scan_time = now.strftime("%H:%M")
-    date_str = now.strftime("%Y-%m-%d")
-    candle_ref = get_last_closed_candle(now)
-
-    print(f"🔍 Scan at {scan_time} | Candle {candle_ref}")
-
-    FNO_STOCKS = [
-        "RELIANCE.NS","SBIN.NS","BHEL.NS","HDFCBANK.NS",
-        "ICICIBANK.NS","INFY.NS","TCS.NS","LT.NS"
-    ]
-
-    current_scan = {}
-
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = [executor.submit(process_stock, s) for s in FNO_STOCKS]
+    with ThreadPoolExecutor(max_workers=STOCK_WORKERS) as executor:
+        futures = [executor.submit(process_stock, s) for s in batch]
 
         for future in as_completed(futures):
-            stock, candle = future.result()
-            if stock:
-                if candle not in current_scan:
-                    current_scan[candle] = []
-                current_scan[candle].append(stock)
+            res = future.result()
+            if res:
+                results.append(res)
 
-    # ===== BUILD MESSAGE =====
-    msg = f"📊 15M SCAN REPORT\n\n"
-    msg += f"⏰ Scan Time: {scan_time}\n"
-    msg += f"📅 Date: {date_str}\n\n"
+    return results
 
-    all_times = set(last_scan.keys()).union(set(current_scan.keys()))
+# ================= MAIN SCAN =================
+def scan_market():
+    print("⚡ Ultra Fast Scan Running...")
 
-    if not all_times:
-        msg += f"🕒 {candle_ref} → NO STOCK\n"
+    all_results = []
+
+    with ThreadPoolExecutor(max_workers=BATCH_WORKERS) as executor:
+        futures = [executor.submit(process_batch, batch) for batch in BATCHES]
+
+        for future in as_completed(futures):
+            batch_result = future.result()
+            all_results.extend(batch_result)
+
+    now = datetime.datetime.now(pytz.timezone('Asia/Kolkata')).strftime("%H:%M")
+
+    if all_results:
+        msg = f"⏰ {now}\n🔥 STOCKS:\n" + "\n".join(all_results)
     else:
-        for t in sorted(all_times):
-            stocks = current_scan.get(t, [])
-            if stocks:
-                msg += f"🕒 {t} → {', '.join(stocks)}\n"
-            else:
-                msg += f"🕒 {t} → NO STOCK\n"
-
-    last_scan = current_scan.copy()
+        msg = f"⏰ {now}\n❌ NO STOCK"
 
     asyncio.run(send_telegram(msg))
 
-# ================= ROBUST LOOP =================
+# ================= LOOP =================
 def run_loop():
     global last_run_key
-
-    print("🚀 Loop Started")
 
     ist = pytz.timezone('Asia/Kolkata')
 
     while True:
         now = datetime.datetime.now(ist)
 
-        # trigger at 09:31, 09:46, 10:01 ...
         if now.minute % 15 == 1 and now.second < 10:
             key = now.strftime("%H:%M")
 
@@ -160,12 +159,9 @@ def home():
 
 # ================= MAIN =================
 if __name__ == "__main__":
-    print("🔥 Bot Starting...")
-
     asyncio.run(send_telegram("🚀 BOT STARTED"))
 
-    # immediate scan (so you don't wait)
-    scan_market()
+    scan_market()  # immediate run
 
     t = threading.Thread(target=run_loop)
     t.daemon = True
