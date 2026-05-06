@@ -23,9 +23,9 @@ app = Flask(__name__)
 # ================= TELEGRAM =================
 async def send_telegram(msg):
     try:
-        print("📤 Sending message...")
+        print("📤 Sending:", msg)
         await bot.send_message(chat_id=CHAT_ID, text=msg)
-        print("✅ Message sent")
+        print("✅ Sent")
     except Exception as e:
         print("❌ Telegram Error:", e)
 
@@ -39,35 +39,17 @@ def check_conditions(df):
 
         last = df.iloc[-1]
 
-        cond1 = last['Volume'] > 500000
-        cond2 = (last['Close'] * last['Volume']) > 150000000
-        cond3 = ((last['High'] - last['Low']) / last['Open'] * 100) > 1
-        cond4 = (abs(last['Close'] - last['Open']) / last['Open'] * 100) > 0.6
-        cond5 = last['Close'] > last['vwap']
-        cond6 = last['Volume'] > (last['vol_sma20'] * 2)
-        cond7 = last['Close'] > last['Open']
-
-        return all([cond1, cond2, cond3, cond4, cond5, cond6, cond7])
-
-    except Exception as e:
-        print("Condition error:", e)
+        return (
+            last['Volume'] > 500000 and
+            (last['Close'] * last['Volume']) > 150000000 and
+            ((last['High'] - last['Low']) / last['Open'] * 100) > 1 and
+            (abs(last['Close'] - last['Open']) / last['Open'] * 100) > 0.6 and
+            last['Close'] > last['vwap'] and
+            last['Volume'] > (last['vol_sma20'] * 2) and
+            last['Close'] > last['Open']
+        )
+    except:
         return False
-
-# ================= WORKER =================
-def process_stock(stock):
-    try:
-        df = yf.download(stock, interval="15m", period="3d", progress=False)
-
-        if len(df) < 30:
-            return None
-
-        if check_conditions(df):
-            return stock
-
-    except Exception as e:
-        print(stock, e)
-
-    return None
 
 # ================= SCAN =================
 def scan_market():
@@ -77,13 +59,18 @@ def scan_market():
 
     results = []
 
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = [executor.submit(process_stock, s) for s in FNO_STOCKS]
+    for stock in FNO_STOCKS:
+        try:
+            df = yf.download(stock, interval="15m", period="3d", progress=False)
 
-        for future in as_completed(futures):
-            res = future.result()
-            if res:
-                results.append(res)
+            if len(df) < 30:
+                continue
+
+            if check_conditions(df):
+                results.append(stock)
+
+        except Exception as e:
+            print(stock, e)
 
     now = datetime.datetime.now(pytz.timezone('Asia/Kolkata')).strftime("%H:%M")
 
@@ -98,7 +85,7 @@ def scan_market():
 def run_scheduler():
     print("🚀 Scheduler started")
 
-    # DEBUG: run every 1 minute
+    # DEBUG MODE (every 1 min)
     schedule.every(1).minutes.do(scan_market)
 
     while True:
@@ -117,8 +104,14 @@ if __name__ == "__main__":
     # send startup message
     asyncio.run(send_telegram("🚀 BOT STARTED"))
 
-    # start scheduler thread
-    threading.Thread(target=run_scheduler, daemon=True).start()
+    # FORCE FIRST SCAN (important fix)
+    scan_market()
 
+    # start scheduler properly
+    t = threading.Thread(target=run_scheduler)
+    t.daemon = True
+    t.start()
+
+    # run flask
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
