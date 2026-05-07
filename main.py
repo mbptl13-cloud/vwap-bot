@@ -206,6 +206,7 @@ def get_candle_data(token, interval, days=5):
 
 
 # ================= RADAR =================
+# ================= RADAR =================
 def radar():
 
     try:
@@ -216,7 +217,7 @@ def radar():
 
         print("📡 RUNNING RADAR...")
 
-        for sym, token in list(TOKENS.items())[:300]:
+        for sym, token in list(TOKENS.items())[:100]:
 
             try:
 
@@ -227,16 +228,6 @@ def radar():
 
                 if df is None:
                     continue
-
-                print(
-                    sym,
-                    "VOL=", last["volume"],
-                    "SMA=", last["vol_sma20"],
-                    "RANGE=", round(range_percent,2),
-                    "BODY=", round(body_percent,2),
-                    "VWAP=", round(last["vwap"],2),
-                    "CLOSE=", round(last["close"],2)
-                )
 
                 if len(df) < 20:
                     continue
@@ -314,7 +305,34 @@ def radar():
                     last["open"]
                 )
 
-                # ================= FINAL =================
+                # ================= TELEGRAM DEBUG =================
+
+                debug_msg = f"""
+📊 {sym}
+
+VOL = {round(last['volume'], 2)}
+VOL_SMA20 = {round(last['vol_sma20'], 2)}
+
+TURNOVER = {round(last['close'] * last['volume'], 2)}
+
+RANGE% = {round(range_percent, 2)}
+BODY% = {round(body_percent, 2)}
+
+VWAP = {round(last['vwap'], 2)}
+CLOSE = {round(last['close'], 2)}
+
+volume_cond = {volume_cond}
+turnover_cond = {turnover_cond}
+range_cond = {range_cond}
+body_cond = {body_cond}
+vwap_cond = {vwap_cond}
+volume_blast_cond = {volume_blast_cond}
+bullish_cond = {bullish_cond}
+"""
+
+                asyncio.run(send(debug_msg))
+
+                # ================= FINAL RADAR =================
 
                 if (
 
@@ -354,15 +372,27 @@ def radar():
 
                     print(f"📡 RADAR: {sym}")
 
+                    asyncio.run(
+                        send(f"📡 RADAR FOUND: {sym}")
+                    )
+
             except Exception as e:
 
                 print(f"❌ {sym} radar error:", e)
 
         print(f"✅ RADAR COUNT: {count}")
 
+        asyncio.run(
+            send(f"✅ RADAR SCAN DONE\nTOTAL RADAR = {count}")
+        )
+
     except Exception as e:
 
         print("❌ RADAR ERROR:", e)
+
+        asyncio.run(
+            send(f"❌ RADAR ERROR:\n{e}")
+        )
 
 
 # ================= ENTRY =================
