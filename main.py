@@ -26,19 +26,19 @@ bot = Bot(token=TOKEN)
 app = Flask(__name__)
 
 # ================= GLOBAL =================
+IST = pytz.timezone("Asia/Kolkata")
+
 TOKENS = {}
 TOKEN_MAP = {}
 
 FEED_TOKEN = None
 JWT = None
-
-candles_15m = {}
-candles_5m = {}
+angel = None
 
 active_radar = {}
 trades = {}
 
-IST = pytz.timezone("Asia/Kolkata")
+live_price = {}
 
 # ================= LOGIN =================
 def login():
@@ -69,7 +69,7 @@ def login():
 # ================= TOKEN FETCH =================
 def get_fno_tokens():
 
-    print("🔄 Fetching FNO + Tokens (STABLE MODE)...")
+    print("🔄 Fetching Tokens...")
 
     url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
 
@@ -78,6 +78,7 @@ def get_fno_tokens():
     }
 
     try:
+
         data = requests.get(
             url,
             headers=headers,
@@ -85,7 +86,8 @@ def get_fno_tokens():
         ).json()
 
     except Exception as e:
-        print("❌ TOKEN FETCH ERROR:", e)
+
+        print("❌ TOKEN ERROR:", e)
         return {}, {}
 
     tokens = {}
@@ -97,7 +99,8 @@ def get_fno_tokens():
 
             if (
                 i.get("exch_seg") == "NSE"
-                and i.get("symbol", "").endswith("-EQ")
+                and
+                i.get("symbol", "").endswith("-EQ")
             ):
 
                 sym = i["symbol"].replace("-EQ", "")
@@ -136,67 +139,70 @@ def vwap(df):
     return df
 
 
-# ================= UPDATE CANDLES =================
-def update(symbol, price):
+# ================= GET CANDLES =================
+def get_candle_data(token, interval, days=5):
 
     try:
 
         now = datetime.datetime.now(IST)
 
-        t15 = now.replace(
-            minute=(now.minute // 15) * 15,
-            second=0,
-            microsecond=0
-        )
+        from_date = (
+            now -
+            datetime.timedelta(days=days)
+        ).strftime("%Y-%m-%d 09:15")
 
-        t5 = now.replace(
-            minute=(now.minute // 5) * 5,
-            second=0,
-            microsecond=0
-        )
+        to_date = now.strftime("%Y-%m-%d %H:%M")
 
-        for store, t in [
+        params = {
 
-            (candles_15m, t15),
-            (candles_5m, t5)
+            "exchange": "NSE",
+
+            "symboltoken": token,
+
+            "interval": interval,
+
+            "fromdate": from_date,
+
+            "todate": to_date
+        }
+
+        hist = angel.getCandleData(params)
+
+        data = hist.get("data")
+
+        if not data:
+            return None
+
+        df = pd.DataFrame(data, columns=[
+
+            "time",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume"
+
+        ])
+
+        for col in [
+
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume"
 
         ]:
 
-            store.setdefault(symbol, [])
+            df[col] = df[col].astype(float)
 
-            # NEW CANDLE
-            if (
-                not store[symbol]
-                or store[symbol][-1]["time"] != t
-            ):
-
-                store[symbol].append({
-
-                    "time": t,
-                    "open": price,
-                    "high": price,
-                    "low": price,
-                    "close": price,
-
-                    # IMPORTANT FIX
-                    "volume": max(price * 100, 1)
-
-                })
-
-            # UPDATE CANDLE
-            else:
-
-                c = store[symbol][-1]
-
-                c["high"] = max(c["high"], price)
-                c["low"] = min(c["low"], price)
-                c["close"] = price
-
-                # IMPORTANT FIX
-                c["volume"] += max(price * 100, 1)
+        return df
 
     except Exception as e:
-        print("❌ UPDATE ERROR:", e)
+
+        print("❌ Candle API Error:", e)
+
+        return None
 
 
 # ================= RADAR =================
@@ -208,72 +214,146 @@ def radar():
 
         count = 0
 
-        for sym in list(candles_15m.keys()):
+        print("📡 RUNNING RADAR...")
 
-            df = pd.DataFrame(candles_15m.get(sym, []))
+        for sym, token in list(TOKENS.items())[:300]:
 
-            if len(df) < 20:
-                continue
+            try:
 
-            df = vwap(df)
+                df = get_candle_data(
+                    token,
+                    "FIFTEEN_MINUTE"
+                )
 
-            # ================= INDICATORS =================
-            df["vol_sma20"] = df["volume"].rolling(20).mean()
+                if df is None:
+                    continue
 
-            last = df.iloc[-1]
+                if len(df) < 20:
+                    continue
 
-            # ================= CONDITIONS =================
+                df = vwap(df)
 
-            volume_cond = last["volume"] > 500000
+                df["vol_sma20"] = (
+                    df["volume"]
+                    .rolling(20)
+                    .mean()
+                )
 
-            turnover_cond = (
-                last["close"] * last["volume"]
-            ) > 15000000
+                last = df.iloc[-1]
 
-            range_percent = (
-                ((last["high"] - last["low"]) / last["open"]) * 100
-            )
+                # ================= CONDITIONS =================
 
-            range_cond = range_percent > 1
+                volume_cond = (
+                    last["volume"] > 500000
+                )
 
-            body_percent = (
-                (abs(last["close"] - last["open"]) / last["open"]) * 100
-            )
+                turnover_cond = (
+                    (
+                        last["close"] *
+                        last["volume"]
+                    ) > 15000000
+                )
 
-            body_cond = body_percent > 0.6
+                range_percent = (
+                    (
+                        (
+                            last["high"] -
+                            last["low"]
+                        )
+                        /
+                        last["open"]
+                    ) * 100
+                )
 
-            vwap_cond = last["close"] > last["vwap"]
+                range_cond = (
+                    range_percent > 1
+                )
 
-            volume_blast_cond = (
-                last["volume"] > (last["vol_sma20"] * 2)
-            )
+                body_percent = (
+                    (
+                        abs(
+                            last["close"] -
+                            last["open"]
+                        )
+                        /
+                        last["open"]
+                    ) * 100
+                )
 
-            bullish_cond = last["close"] > last["open"]
+                body_cond = (
+                    body_percent > 0.6
+                )
 
-            # ================= FINAL RADAR =================
-            if (
-                volume_cond
-                and turnover_cond
-                and range_cond
-                and body_cond
-                and vwap_cond
-                and volume_blast_cond
-                and bullish_cond
-            ):
+                vwap_cond = (
+                    last["close"] >
+                    last["vwap"]
+                )
 
-                active_radar[sym] = {
-                    "time": last["time"],
-                    "high": last["high"],
-                    "low": last["low"],
-                    "close": last["close"]
-                }
+                volume_blast_cond = (
 
-                count += 1
+                    last["volume"]
+                    >
+                    (
+                        last["vol_sma20"] * 2
+                    )
 
-        print(f"📡 RADAR COUNT: {count}")
+                )
+
+                bullish_cond = (
+                    last["close"] >
+                    last["open"]
+                )
+
+                # ================= FINAL =================
+
+                if (
+
+                    volume_cond
+                    and
+                    turnover_cond
+                    and
+                    range_cond
+                    and
+                    body_cond
+                    and
+                    vwap_cond
+                    and
+                    volume_blast_cond
+                    and
+                    bullish_cond
+
+                ):
+
+                    active_radar[sym] = {
+
+                        "time":
+                            last["time"],
+
+                        "high":
+                            last["high"],
+
+                        "low":
+                            last["low"],
+
+                        "close":
+                            last["close"]
+
+                    }
+
+                    count += 1
+
+                    print(f"📡 RADAR: {sym}")
+
+            except Exception as e:
+
+                print(f"❌ {sym} radar error:", e)
+
+        print(f"✅ RADAR COUNT: {count}")
 
     except Exception as e:
+
         print("❌ RADAR ERROR:", e)
+
 
 # ================= ENTRY =================
 def entry():
@@ -294,7 +374,15 @@ def entry():
             if sym in trades:
                 continue
 
-            df = pd.DataFrame(candles_5m.get(sym, []))
+            token = TOKENS[sym]
+
+            df = get_candle_data(
+                token,
+                "FIVE_MINUTE"
+            )
+
+            if df is None:
+                continue
 
             if len(df) < 20:
                 continue
@@ -307,57 +395,93 @@ def entry():
             # ================= VWAP PULLBACK =================
 
             touch_vwap = (
-                last["low"] <= last["vwap"] * 1.002
+
+                last["low"]
+                <=
+                last["vwap"] * 1.002
+
             )
 
             bullish_candle = (
-                last["close"] > last["open"]
+                last["close"] >
+                last["open"]
             )
 
             close_above_vwap = (
-                last["close"] > last["vwap"]
+                last["close"] >
+                last["vwap"]
             )
 
             breakout = (
-                last["close"] > prev["high"]
+                last["close"] >
+                prev["high"]
             )
 
             # ================= FINAL ENTRY =================
+
             if (
+
                 touch_vwap
-                and bullish_candle
-                and close_above_vwap
-                and breakout
+                and
+                bullish_candle
+                and
+                close_above_vwap
+                and
+                breakout
+
             ):
 
-                sl = min(last["low"], prev["low"])
+                sl = min(
+                    last["low"],
+                    prev["low"]
+                )
 
                 target = (
-                    last["close"] +
-                    ((last["close"] - sl) * 2)
+
+                    last["close"]
+
+                    +
+
+                    (
+                        (
+                            last["close"] -
+                            sl
+                        ) * 2
+                    )
+
                 )
 
                 trades[sym] = {
 
-                    "date": now.strftime("%Y-%m-%d"),
+                    "date":
+                        now.strftime("%Y-%m-%d"),
 
-                    "radar": active_radar[sym]["time"].strftime("%H:%M"),
+                    "radar":
+                        active_radar[sym]["time"],
 
-                    "entry": now.strftime("%H:%M"),
+                    "entry":
+                        now.strftime("%H:%M"),
 
-                    "entry_price": last["close"],
+                    "entry_price":
+                        last["close"],
 
-                    "sl": sl,
+                    "sl":
+                        sl,
 
-                    "tgt": target,
+                    "tgt":
+                        target,
 
-                    "status": "OPEN"
+                    "status":
+                        "OPEN"
+
                 }
 
-                print(f"🚀 TRADE GENERATED: {sym}")
+                print(f"🚀 ENTRY: {sym}")
 
     except Exception as e:
+
         print("❌ ENTRY ERROR:", e)
+
 
 # ================= RESULT =================
 def result():
@@ -369,24 +493,25 @@ def result():
             if t["status"] != "OPEN":
                 continue
 
-            df = pd.DataFrame(
-                candles_5m.get(sym, [])
-            )
+            ltp = live_price.get(sym)
 
-            if len(df) < 1:
+            if not ltp:
                 continue
 
-            last = df.iloc[-1]
-
-            if last["low"] <= t["sl"]:
+            if ltp <= t["sl"]:
 
                 t["status"] = "LOSS"
 
-            elif last["high"] >= t["tgt"]:
+                print(f"❌ SL HIT: {sym}")
+
+            elif ltp >= t["tgt"]:
 
                 t["status"] = "WIN"
 
+                print(f"✅ TARGET HIT: {sym}")
+
     except Exception as e:
+
         print("❌ RESULT ERROR:", e)
 
 
@@ -425,16 +550,11 @@ f"""📊 STOCK: {sym}
     return "\n".join(out)
 
 
-# ================= LIVE REFRESH =================
-def refresh_live_data():
-
-    radar()
-    entry()
-    result()
-
-
 # ================= LOOP =================
 def loop():
+
+    last_radar = None
+    last_entry = None
 
     while True:
 
@@ -448,9 +568,27 @@ def loop():
                 <= datetime.time(15, 30)
             ):
 
-                radar()
+                radar_key = now.strftime(
+                    "%Y-%m-%d %H:%M"
+                )
 
-                entry()
+                # ================= RADAR =================
+                if now.minute % 15 == 1:
+
+                    if radar_key != last_radar:
+
+                        last_radar = radar_key
+
+                        radar()
+
+                # ================= ENTRY =================
+                if now.minute % 5 == 0:
+
+                    if radar_key != last_entry:
+
+                        last_entry = radar_key
+
+                        entry()
 
                 result()
 
@@ -459,6 +597,7 @@ def loop():
         except Exception as e:
 
             print("❌ LOOP ERROR:", e)
+
             time.sleep(5)
 
 
@@ -467,14 +606,12 @@ def socket():
 
     global FEED_TOKEN
     global JWT
-    global TOKENS
-    global TOKEN_MAP
 
     while True:
 
         try:
 
-            print("🔌 Starting WebSocket...")
+            print("🔌 STARTING WEBSOCKET...")
 
             sws = SmartWebSocketV2(
                 AUTH_TOKEN=JWT,
@@ -483,75 +620,71 @@ def socket():
                 FEED_TOKEN=FEED_TOKEN
             )
 
-            # ================= ON OPEN =================
+            # ================= OPEN =================
             def on_open(ws):
 
-                print("✅ WebSocket Connected")
+                print("✅ SOCKET CONNECTED")
 
-                # IMPORTANT FIX
-                all_tokens = list(TOKENS.values())[:500]
+                tokens = list(TOKENS.values())[:500]
 
                 batch_size = 50
 
                 for i in range(
                     0,
-                    len(all_tokens),
+                    len(tokens),
                     batch_size
                 ):
 
-                    batch = all_tokens[i:i+batch_size]
+                    batch = tokens[i:i+batch_size]
 
                     sws.subscribe(
+
                         correlation_id=f"sub_{i}",
+
                         mode=1,
+
                         token_list=[
+
                             {
                                 "exchangeType": 1,
                                 "tokens": batch
                             }
-                        ]
-                    )
 
-                    print(
-                        f"📡 Subscribed Batch: "
-                        f"{i} to {i+len(batch)}"
+                        ]
                     )
 
                     time.sleep(1)
 
-            # ================= ON DATA =================
-            def on_data(ws, message):
+            # ================= DATA =================
+            def on_data(ws, msg):
 
                 try:
 
                     token = str(
-                        message.get("token")
+                        msg.get("token")
                     )
 
                     ltp = float(
-                        message.get(
+                        msg.get(
                             "last_traded_price",
                             0
                         )
                     ) / 100
 
-                    if ltp <= 0:
-                        return
-
                     symbol = TOKEN_MAP.get(token)
 
                     if symbol:
 
-                        update(symbol, ltp)
+                        live_price[symbol] = ltp
 
-                except Exception as e:
-                    print("❌ DATA ERROR:", e)
+                except:
+                    pass
 
-            # ================= ON ERROR =================
-            def on_error(ws, error):
-                print("❌ SOCKET ERROR:", error)
+            # ================= ERROR =================
+            def on_error(ws, e):
+                print("❌ SOCKET ERROR:", e)
 
-            # ================= ON CLOSE =================
+            # ================= CLOSE =================
             def on_close(ws):
                 print("⚠ SOCKET CLOSED")
 
@@ -596,21 +729,23 @@ def webhook():
             return "ok", 200
 
         text = (
+
             data
             .get("message", {})
             .get("text", "")
             .strip()
             .upper()
+
         )
 
         print("📩 COMMAND:", text)
 
+        # ================= LIVE =================
         if text == "LIVE":
-
-            refresh_live_data()
 
             msg = report()
 
+        # ================= RADAR =================
         elif text == "RADAR":
 
             if not active_radar:
@@ -620,7 +755,12 @@ def webhook():
             else:
 
                 msg = "\n".join(
-                    list(active_radar.keys())[:50]
+
+                    [
+                        f"📡 {x}"
+                        for x in active_radar.keys()
+                    ]
+
                 )
 
         else:
