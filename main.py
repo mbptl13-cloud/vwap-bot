@@ -481,14 +481,35 @@ def radar():
 
         else:
 
+            time_map = {}
+            for k, r in radar_history.items():
+                t = r["time"]
+
+                if t not in time_map:
+                    time_map[t] = []
+
+                time_map[t].append(r["symbol"])
+
+            sorted_times = sorted(
+                time_map.keys(),
+                key=lambda x: datetime.datetime.strptime(
+                    x,
+                    "%H:%M"
+                )
+            )
             msg = "📡 RADAR SIGNALS\n\n"
 
-            for k, r in radar_history.items():
+            for t in sorted_times:
 
-                msg += (
-                    f"{r['time']}  "
-                    f"{r['symbol']}\n"
-                )
+                stocks = sorted(time_map[t])
+
+                msg += f"⏰ {t}\n"
+
+                for s in stocks:
+
+                    msg += f"• {s}\n"
+
+                msg += "\n"
 
             asyncio.run(send(msg))
 
