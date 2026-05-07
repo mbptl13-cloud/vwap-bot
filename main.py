@@ -271,7 +271,14 @@ def loop():
 
         time.sleep(3)
 
+def subscribe_dynamic(sws, tokens):
+    batch_size = 50
 
+    for i in range(0, len(tokens), batch_size):
+        sws.subscribe([
+            {"exchangeType": 1, "tokens": tokens[i:i+batch_size]}
+        ])
+        time.sleep(0.5)
 # ================= SOCKET =================
 def socket():
     global FEED_TOKEN, JWT
