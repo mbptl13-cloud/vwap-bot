@@ -352,6 +352,10 @@ def webhook():
         print("❌ WEBHOOK ERROR:", e)
         return "error", 200
 
+@app.route("/", methods=["GET"])
+def home():
+    return "BOT RUNNING", 200
+
 
 # ================= MAIN =================
 if __name__ == "__main__":
