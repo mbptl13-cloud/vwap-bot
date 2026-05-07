@@ -47,6 +47,7 @@ active_radar = {}
 trades = {}
 
 live_price = {}
+radar_history = {}
 
 # ================= LOGIN =================
 
@@ -278,6 +279,7 @@ def get_candle_data(token, interval):
 
 # ================= RADAR =================
 
+# ================= RADAR =================
 def radar():
 
     global scan_running
@@ -285,8 +287,6 @@ def radar():
     try:
 
         scan_running = True
-
-        active_radar.clear()
 
         count = 0
 
@@ -296,12 +296,7 @@ def radar():
 
             if not scan_running:
 
-                print("🛑 SCAN STOPPED")
-
-                asyncio.run(
-                    send("🛑 SCAN STOPPED")
-                )
-
+                asyncio.run(send("🛑 SCAN STOPPED"))
                 return
 
             try:
@@ -325,121 +320,152 @@ def radar():
                     .mean()
                 )
 
-                last = df.iloc[-1]
+                # CHECK ALL CANDLES
+                for i in range(len(df)):
 
-                # ================= YOUR ORIGINAL CONDITIONS =================
+                    row = df.iloc[i]
 
-                volume_cond = (
-                    last["volume"] > 500000
-                )
+                    candle_time = row["time"]
 
-                turnover_cond = (
-                    (
-                        last["close"]
-                        *
-                        last["volume"]
-                    ) > 15000000
-                )
+                    # MARKET TIME FILTER
+                    if candle_time.hour < 9:
+                        continue
 
-                range_percent = (
-                    (
+                    if (
+                        candle_time.hour == 9
+                        and
+                        candle_time.minute < 30
+                    ):
+                        continue
+
+                    if candle_time.hour > 15:
+                        continue
+
+                    # ================= CONDITIONS =================
+
+                    volume_cond = (
+                        row["volume"] > 500000
+                    )
+
+                    turnover_cond = (
                         (
-                            last["high"]
-                            -
-                            last["low"]
-                        )
-                        /
-                        last["open"]
-                    ) * 100
-                )
-
-                range_cond = (
-                    range_percent > 1
-                )
-
-                body_percent = (
-                    (
-                        abs(
-                            last["close"]
-                            -
-                            last["open"]
-                        )
-                        /
-                        last["open"]
-                    ) * 100
-                )
-
-                body_cond = (
-                    body_percent > 0.6
-                )
-
-                vwap_cond = (
-                    last["close"]
-                    >
-                    last["vwap"]
-                )
-
-                volume_blast_cond = (
-                    last["volume"]
-                    >
-                    (
-                        last["vol_sma20"] * 2
+                            row["close"]
+                            *
+                            row["volume"]
+                        ) > 15000000
                     )
-                )
 
-                bullish_cond = (
-                    last["close"]
-                    >
-                    last["open"]
-                )
+                    range_percent = (
+                        (
+                            (
+                                row["high"]
+                                -
+                                row["low"]
+                            )
+                            /
+                            row["open"]
+                        ) * 100
+                    )
 
-                # ================= FINAL RADAR =================
+                    range_cond = (
+                        range_percent > 1
+                    )
 
-                if (
+                    body_percent = (
+                        (
+                            abs(
+                                row["close"]
+                                -
+                                row["open"]
+                            )
+                            /
+                            row["open"]
+                        ) * 100
+                    )
 
-                    volume_cond
-                    and
-                    turnover_cond
-                    and
-                    range_cond
-                    and
-                    body_cond
-                    and
-                    vwap_cond
-                    and
-                    volume_blast_cond
-                    and
-                    bullish_cond
+                    body_cond = (
+                        body_percent > 0.6
+                    )
 
-                ):
+                    vwap_cond = (
+                        row["close"]
+                        >
+                        row["vwap"]
+                    )
 
-                    active_radar[sym] = {
-
-                        "time":
-                            last["time"],
-
-                        "high":
-                            last["high"],
-
-                        "low":
-                            last["low"],
-
-                        "close":
-                            last["close"]
-
-                    }
-
-                    count += 1
-
-                    print(f"📡 RADAR FOUND: {sym}")
-
-                    asyncio.run(
-                        send(
-                            f"📡 RADAR FOUND\n\n"
-                            f"STOCK: {sym}\n"
-                            f"CLOSE: {round(last['close'],2)}"
+                    volume_blast_cond = (
+                        row["volume"]
+                        >
+                        (
+                            row["vol_sma20"] * 2
                         )
                     )
+
+                    bullish_cond = (
+                        row["close"]
+                        >
+                        row["open"]
+                    )
+
+                    # ================= FINAL RADAR =================
+
+                    if (
+
+                        volume_cond
+                        and
+                        turnover_cond
+                        and
+                        range_cond
+                        and
+                        body_cond
+                        and
+                        vwap_cond
+                        and
+                        volume_blast_cond
+                        and
+                        bullish_cond
+
+                    ):
+
+                        key = (
+                            sym
+                            +
+                            "_"
+                            +
+                            candle_time.strftime("%H:%M")
+                        )
+
+                        if key in radar_history:
+                            continue
+
+                        radar_history[key] = {
+
+                            "symbol":
+                                sym,
+
+                            "time":
+                                candle_time.strftime("%H:%M"),
+
+                            "high":
+                                row["high"],
+
+                            "low":
+                                row["low"],
+
+                            "close":
+                                row["close"]
+
+                        }
+
+                        active_radar[sym] = radar_history[key]
+
+                        count += 1
+
+                        print(
+                            f"📡 RADAR: "
+                            f"{sym} "
+                            f"{candle_time.strftime('%H:%M')}"
+                        )
 
             except Exception as e:
 
@@ -455,12 +481,16 @@ def radar():
 
         else:
 
-            asyncio.run(
-                send(
-                    f"✅ RADAR COMPLETE\n"
-                    f"TOTAL: {count}"
+            msg = "📡 RADAR SIGNALS\n\n"
+
+            for k, r in radar_history.items():
+
+                msg += (
+                    f"{r['time']}  "
+                    f"{r['symbol']}\n"
                 )
-            )
+
+            asyncio.run(send(msg))
 
     except Exception as e:
 
@@ -607,36 +637,63 @@ def result():
 
 # ================= REPORT =================
 
+# ================= REPORT =================
 def report():
-
-    if not trades:
-        return "❌ NO TRADES TODAY"
 
     out = []
 
-    for sym, t in trades.items():
+    # ================= TRADES =================
 
-        out.append(
+    if trades:
 
-f"""📊 STOCK: {sym}
+        out.append("🚀 TRADES\n")
 
-📅 DATE: {t['date']}
+        for sym, t in trades.items():
 
-📡 RADAR TIME: {t['radar']}
+            out.append(
 
-🚀 ENTRY TIME: {t['entry']}
+f"""📊 {sym}
 
-💰 ENTRY PRICE: {round(t['entry_price'], 2)}
+📡 RADAR: {t['radar']}
 
-🛑 SL: {round(t['sl'], 2)}
+🚀 ENTRY: {t['entry']}
 
-🎯 TARGET: {round(t['tgt'], 2)}
+💰 ENTRY: {round(t['entry_price'],2)}
+
+🛑 SL: {round(t['sl'],2)}
+
+🎯 TARGET: {round(t['tgt'],2)}
 
 📌 STATUS: {t['status']}
 
 ━━━━━━━━━━━━━━━"""
 
-        )
+            )
+
+    # ================= RADAR ONLY =================
+
+    radar_only = []
+
+    for k, r in radar_history.items():
+
+        if r["symbol"] not in trades:
+
+            radar_only.append(
+
+                f"{r['time']}  "
+                f"{r['symbol']}"
+
+            )
+
+    if radar_only:
+
+        out.append("\n📡 RADAR WAITING\n")
+
+        out.extend(radar_only)
+
+    if not out:
+
+        return "❌ NO SIGNALS TODAY"
 
     return "\n".join(out)
 
