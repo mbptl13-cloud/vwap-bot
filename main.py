@@ -788,6 +788,8 @@ def webhook():
         # ================= RADAR =================
         elif text == "RADAR":
 
+            radar()
+
             if not active_radar:
 
                 msg = "❌ NO RADAR FOUND"
