@@ -228,6 +228,16 @@ def radar():
                 if df is None:
                     continue
 
+                print(
+                    sym,
+                    "VOL=", last["volume"],
+                    "SMA=", last["vol_sma20"],
+                    "RANGE=", round(range_percent,2),
+                    "BODY=", round(body_percent,2),
+                    "VWAP=", round(last["vwap"],2),
+                    "CLOSE=", round(last["close"],2)
+                )
+
                 if len(df) < 20:
                     continue
 
