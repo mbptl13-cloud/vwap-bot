@@ -40,9 +40,6 @@ angel = None
 
 scan_running = False
 
-candles_15m = {}
-candles_5m = {}
-
 active_radar = {}
 trades = {}
 
@@ -136,8 +133,6 @@ def get_fno_tokens():
 
         return {}, {}
 
-    # ================= FIND FNO SYMBOLS =================
-
     fno_symbols = set()
 
     for i in data:
@@ -155,8 +150,6 @@ def get_fno_tokens():
             pass
 
     print(f"✅ FNO SYMBOLS: {len(fno_symbols)}")
-
-    # ================= NSE TOKENS =================
 
     tokens = {}
     token_map = {}
@@ -212,7 +205,7 @@ def refresh_tokens():
 
         time.sleep(20)
 
-# ================= CANDLE DATA =================
+# ================= CANDLE API =================
 
 def get_candle_data(token, interval):
 
@@ -279,7 +272,6 @@ def get_candle_data(token, interval):
 
 # ================= RADAR =================
 
-# ================= RADAR =================
 def radar():
 
     global scan_running
@@ -287,6 +279,9 @@ def radar():
     try:
 
         scan_running = True
+
+        radar_history.clear()
+        active_radar.clear()
 
         count = 0
 
@@ -297,6 +292,7 @@ def radar():
             if not scan_running:
 
                 asyncio.run(send("🛑 SCAN STOPPED"))
+
                 return
 
             try:
@@ -320,14 +316,14 @@ def radar():
                     .mean()
                 )
 
-                # CHECK ALL CANDLES
                 for i in range(len(df)):
 
                     row = df.iloc[i]
 
                     candle_time = row["time"]
 
-                    # MARKET TIME FILTER
+                    # ================= MARKET TIME =================
+
                     if candle_time.hour < 9:
                         continue
 
@@ -427,33 +423,20 @@ def radar():
 
                     ):
 
-                        key = (
-                            sym
-                            +
-                            "_"
-                            +
-                            candle_time.strftime("%H:%M")
-                        )
+                        tm = candle_time.strftime("%H:%M")
+
+                        key = f"{sym}_{tm}"
 
                         if key in radar_history:
                             continue
 
                         radar_history[key] = {
 
-                            "symbol":
-                                sym,
-
-                            "time":
-                                candle_time.strftime("%H:%M"),
-
-                            "high":
-                                row["high"],
-
-                            "low":
-                                row["low"],
-
-                            "close":
-                                row["close"]
+                            "symbol": sym,
+                            "time": tm,
+                            "high": row["high"],
+                            "low": row["low"],
+                            "close": row["close"]
 
                         }
 
@@ -461,11 +444,7 @@ def radar():
 
                         count += 1
 
-                        print(
-                            f"📡 RADAR: "
-                            f"{sym} "
-                            f"{candle_time.strftime('%H:%M')}"
-                        )
+                        print(f"📡 {sym} {tm}")
 
             except Exception as e:
 
@@ -479,39 +458,43 @@ def radar():
                 send("❌ NO RADAR FOUND")
             )
 
-        else:
+            return
 
-            time_map = {}
-            for k, r in radar_history.items():
-                t = r["time"]
+        # ================= SORTED OUTPUT =================
 
-                if t not in time_map:
-                    time_map[t] = []
+        time_map = {}
 
-                time_map[t].append(r["symbol"])
+        for k, r in radar_history.items():
 
-            sorted_times = sorted(
-                time_map.keys(),
-                key=lambda x: datetime.datetime.strptime(
-                    x,
-                    "%H:%M"
-                )
+            tm = r["time"]
+
+            if tm not in time_map:
+                time_map[tm] = []
+
+            time_map[tm].append(r["symbol"])
+
+        sorted_times = sorted(
+            time_map.keys(),
+            key=lambda x:
+            datetime.datetime.strptime(
+                x,
+                "%H:%M"
             )
-            msg = "📡 RADAR SIGNALS\n\n"
+        )
 
-            for t in sorted_times:
+        msg = "📡 RADAR SIGNALS\n\n"
 
-                stocks = sorted(time_map[t])
+        for tm in sorted_times:
 
-                msg += f"⏰ {t}\n"
+            msg += f"⏰ {tm}\n"
 
-                for s in stocks:
+            for s in sorted(time_map[tm]):
 
-                    msg += f"• {s}\n"
+                msg += f"• {s}\n"
 
-                msg += "\n"
+            msg += "\n"
 
-            asyncio.run(send(msg))
+        asyncio.run(send(msg))
 
     except Exception as e:
 
@@ -532,86 +515,95 @@ def entry():
         <=
         now.time()
         <=
-        datetime.time(13,30)
+        datetime.time(15,30)
     ):
         return
 
     for sym in active_radar:
 
-        if sym in trades:
-            continue
+        try:
 
-        token = TOKENS[sym]
+            if sym in trades:
+                continue
 
-        df = get_candle_data(
-            token,
-            "FIVE_MINUTE"
-        )
+            token = TOKENS[sym]
 
-        if df is None:
-            continue
+            df = get_candle_data(
+                token,
+                "FIVE_MINUTE"
+            )
 
-        if len(df) < 10:
-            continue
+            if df is None:
+                continue
 
-        df = vwap(df)
+            if len(df) < 10:
+                continue
 
-        last = df.iloc[-1]
-        prev = df.iloc[-2]
+            df = vwap(df)
 
-        r = active_radar[sym]
+            last = df.iloc[-1]
+            prev = df.iloc[-2]
 
-        # ================= YOUR ORIGINAL 5M CONDITION =================
+            r = active_radar[sym]
 
-        if (
-            last["close"] > last["vwap"]
-            and
-            prev["low"] <= prev["vwap"] * 1.002
-        ):
+            # ================= ORIGINAL 5M CONDITION =================
 
-            trades[sym] = {
+            if (
+                last["close"] > last["vwap"]
+                and
+                prev["low"] <= prev["vwap"] * 1.002
+            ):
 
-                "date":
-                    now.strftime("%Y-%m-%d"),
+                trades[sym] = {
 
-                "radar":
-                    r["time"].strftime("%H:%M"),
+                    "date":
+                        now.strftime("%Y-%m-%d"),
 
-                "entry":
-                    now.strftime("%H:%M"),
+                    "radar":
+                        r["time"],
 
-                "entry_price":
-                    last["close"],
+                    "entry":
+                        now.strftime("%H:%M"),
 
-                "sl":
-                    min(
-                        prev["low"],
-                        r["low"]
-                    ),
+                    "entry_price":
+                        last["close"],
 
-                "tgt":
-                    last["close"] +
-                    (
-                        last["close"]
-                        -
+                    "sl":
                         min(
                             prev["low"],
                             r["low"]
-                        )
-                    ),
+                        ),
 
-                "status":
-                    "OPEN"
+                    "tgt":
+                        last["close"]
+                        +
+                        (
+                            last["close"]
+                            -
+                            min(
+                                prev["low"],
+                                r["low"]
+                            )
+                        ),
 
-            }
+                    "status":
+                        "OPEN"
 
-            asyncio.run(
-                send(
-                    f"🚀 ENTRY ALERT\n\n"
-                    f"STOCK: {sym}\n"
-                    f"ENTRY: {round(last['close'],2)}"
+                }
+
+                asyncio.run(
+                    send(
+                        f"🚀 ENTRY ALERT\n\n"
+                        f"STOCK: {sym}\n"
+                        f"RADAR: {r['time']}\n"
+                        f"ENTRY: {now.strftime('%H:%M')}\n"
+                        f"PRICE: {round(last['close'],2)}"
+                    )
                 )
-            )
+
+        except Exception as e:
+
+            print(f"❌ ENTRY {sym}:", e)
 
 # ================= RESULT =================
 
@@ -619,46 +611,51 @@ def result():
 
     for sym, t in trades.items():
 
-        if t["status"] != "OPEN":
-            continue
+        try:
 
-        token = TOKENS[sym]
+            if t["status"] != "OPEN":
+                continue
 
-        df = get_candle_data(
-            token,
-            "FIVE_MINUTE"
-        )
+            token = TOKENS[sym]
 
-        if df is None:
-            continue
-
-        last = df.iloc[-1]
-
-        if last["low"] <= t["sl"]:
-
-            t["status"] = "LOSS"
-
-            asyncio.run(
-                send(
-                    f"❌ SL HIT\n\n"
-                    f"STOCK: {sym}"
-                )
+            df = get_candle_data(
+                token,
+                "FIVE_MINUTE"
             )
 
-        elif last["high"] >= t["tgt"]:
+            if df is None:
+                continue
 
-            t["status"] = "WIN"
+            last = df.iloc[-1]
 
-            asyncio.run(
-                send(
-                    f"🎯 TARGET HIT\n\n"
-                    f"STOCK: {sym}"
+            if last["low"] <= t["sl"]:
+
+                t["status"] = "LOSS"
+
+                asyncio.run(
+                    send(
+                        f"❌ SL HIT\n\n"
+                        f"STOCK: {sym}"
+                    )
                 )
-            )
+
+            elif last["high"] >= t["tgt"]:
+
+                t["status"] = "WIN"
+
+                asyncio.run(
+                    send(
+                        f"🎯 TARGET HIT\n\n"
+                        f"STOCK: {sym}"
+                    )
+                )
+
+        except Exception as e:
+
+            print(f"❌ RESULT {sym}:", e)
 
 # ================= REPORT =================
 
-# ================= REPORT =================
 def report():
 
     out = []
@@ -679,7 +676,7 @@ f"""📊 {sym}
 
 🚀 ENTRY: {t['entry']}
 
-💰 ENTRY: {round(t['entry_price'],2)}
+💰 ENTRY PRICE: {round(t['entry_price'],2)}
 
 🛑 SL: {round(t['sl'],2)}
 
@@ -700,15 +697,16 @@ f"""📊 {sym}
         if r["symbol"] not in trades:
 
             radar_only.append(
-
-                f"{r['time']}  "
-                f"{r['symbol']}"
-
+                f"{r['time']}  {r['symbol']}"
             )
 
     if radar_only:
 
         out.append("\n📡 RADAR WAITING\n")
+
+        radar_only = sorted(
+            radar_only
+        )
 
         out.extend(radar_only)
 
@@ -740,9 +738,9 @@ def loop():
                 datetime.time(15,30)
             ):
 
-                if now.minute % 5 == 0:
+                key = now.strftime("%H:%M")
 
-                    key = now.strftime("%H:%M")
+                if now.minute % 5 == 0:
 
                     if key != last:
 
