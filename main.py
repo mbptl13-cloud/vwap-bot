@@ -270,10 +270,9 @@ def get_candle_data(token, interval):
 
         return None
 
-# =================  =================
+# =================RADAR CHECK=================
 
-def ():
-
+def radar():
     global scan_running
     global radar_history
     global active_radar
