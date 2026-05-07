@@ -22,7 +22,7 @@ PASSWORD = "2329"
 TOTP_SECRET = "3QCEGXTQKFN6BNHP76N7P3QZAY"
 
 TOKEN = "8602800906:AAHTYNJ-96TXL6Mi8xDvS5VRw1ewy_sDBXY"
-CHAT_ID = 309248606
+CHAT_ID = 309248606 
 
 bot = Bot(token=TOKEN)
 
@@ -42,9 +42,11 @@ scan_running = False
 
 active_radar = {}
 trades = {}
+radar_history = {}
 
 live_price = {}
-radar_history = {}
+
+IST = pytz.timezone("Asia/Kolkata")
 
 # ================= LOGIN =================
 
@@ -189,11 +191,9 @@ def refresh_tokens():
     global TOKENS
     global TOKEN_MAP
 
-    ist = pytz.timezone("Asia/Kolkata")
-
     while True:
 
-        now = datetime.datetime.now(ist)
+        now = datetime.datetime.now(IST)
 
         if now.hour == 8 and now.minute == 45:
 
@@ -213,9 +213,7 @@ def get_candle_data(token, interval):
 
     try:
 
-        ist = pytz.timezone("Asia/Kolkata")
-
-        now = datetime.datetime.now(ist)
+        now = datetime.datetime.now(IST)
 
         from_date = (
             now -
@@ -270,28 +268,36 @@ def get_candle_data(token, interval):
 
         return None
 
+# ================= MARKET TIME FILTER =================
+
+def valid_radar_time(candle_time):
+
+    t = candle_time.time()
+
+    return (
+        datetime.time(9, 30)
+        <=
+        t
+        <=
+        datetime.time(14, 30)
+    )
+
 # ================= RADAR =================
 
 def radar():
 
     global scan_running
-    global radar_history
-    global active_radar
 
     try:
 
         scan_running = True
 
-        radar_history = {}
-        active_radar = {}
+        radar_history.clear()
+        active_radar.clear()
 
         count = 0
 
         print("📡 RUNNING RADAR...")
-
-        ist = pytz.timezone("Asia/Kolkata")
-
-        today = datetime.datetime.now(ist).date()
 
         for sym, token in TOKENS.items():
 
@@ -321,28 +327,13 @@ def radar():
                     .mean()
                 )
 
-                for i in range(len(df)):
+                for i in range(20, len(df)):
 
                     row = df.iloc[i]
 
                     candle_time = row["time"]
 
-                    # ================= TODAY FILTER =================
-
-                    candle_date = candle_time.date()
-
-                    if candle_date != today:
-                        continue
-
-                    # ================= MARKET TIME FILTER =================
-
-                    if candle_time.hour < 9:
-                        continue
-
-                    if candle_time.hour == 9 and candle_time.minute < 30:
-                        continue
-
-                    if candle_time.hour > 15:
+                    if not valid_radar_time(candle_time):
                         continue
 
                     # ================= CONDITIONS =================
@@ -451,13 +442,13 @@ def radar():
                                 candle_time.strftime("%H:%M"),
 
                             "high":
-                                row["high"],
+                                float(row["high"]),
 
                             "low":
-                                row["low"],
+                                float(row["low"]),
 
                             "close":
-                                row["close"]
+                                float(row["close"])
 
                         }
 
@@ -508,11 +499,9 @@ def radar():
 
             for t in sorted_times:
 
-                stocks = sorted(time_map[t])
-
                 msg += f"⏰ {t}\n"
 
-                for s in stocks:
+                for s in sorted(time_map[t]):
 
                     msg += f"• {s}\n"
 
@@ -530,16 +519,16 @@ def radar():
 
 def entry():
 
-    now = datetime.datetime.now(
-        pytz.timezone("Asia/Kolkata")
-    )
+    now = datetime.datetime.now(IST)
+
+    # ENTRY TIME ONLY 9:30 TO 14:30
 
     if not (
-        datetime.time(9,45)
+        datetime.time(9,30)
         <=
         now.time()
         <=
-        datetime.time(13,30)
+        datetime.time(14,30)
     ):
         return
 
@@ -588,22 +577,22 @@ def entry():
                     now.strftime("%H:%M"),
 
                 "entry_price":
-                    last["close"],
+                    float(last["close"]),
 
                 "sl":
                     min(
-                        prev["low"],
-                        r["low"]
+                        float(prev["low"]),
+                        float(r["low"])
                     ),
 
                 "tgt":
-                    last["close"] +
+                    float(last["close"]) +
                     (
-                        last["close"]
+                        float(last["close"])
                         -
                         min(
-                            prev["low"],
-                            r["low"]
+                            float(prev["low"]),
+                            float(r["low"])
                         )
                     ),
 
@@ -615,14 +604,29 @@ def entry():
             asyncio.run(
                 send(
                     f"🚀 ENTRY ALERT\n\n"
-                    f"STOCK: {sym}\n"
-                    f"ENTRY: {round(last['close'],2)}"
+                    f"📊 STOCK: {sym}\n"
+                    f"📡 RADAR: {r['time']}\n"
+                    f"🚀 ENTRY: {now.strftime('%H:%M')}\n"
+                    f"💰 PRICE: {round(last['close'],2)}"
                 )
             )
 
 # ================= RESULT =================
 
 def result():
+
+    now = datetime.datetime.now(IST)
+
+    # RESULT CHECK 9:30 TO 15:30
+
+    if not (
+        datetime.time(9,30)
+        <=
+        now.time()
+        <=
+        datetime.time(15,30)
+    ):
+        return
 
     for sym, t in trades.items():
 
@@ -648,7 +652,7 @@ def result():
             asyncio.run(
                 send(
                     f"❌ SL HIT\n\n"
-                    f"STOCK: {sym}"
+                    f"📊 STOCK: {sym}"
                 )
             )
 
@@ -659,7 +663,7 @@ def result():
             asyncio.run(
                 send(
                     f"🎯 TARGET HIT\n\n"
-                    f"STOCK: {sym}"
+                    f"📊 STOCK: {sym}"
                 )
             )
 
@@ -669,11 +673,18 @@ def report():
 
     out = []
 
+    # ================= TRADES =================
+
     if trades:
 
         out.append("🚀 TRADES\n")
 
-        for sym, t in trades.items():
+        sorted_trades = sorted(
+            trades.items(),
+            key=lambda x: x[1]["entry"]
+        )
+
+        for sym, t in sorted_trades:
 
             out.append(
 
@@ -683,7 +694,7 @@ f"""📊 {sym}
 
 🚀 ENTRY: {t['entry']}
 
-💰 ENTRY: {round(t['entry_price'],2)}
+💰 ENTRY PRICE: {round(t['entry_price'],2)}
 
 🛑 SL: {round(t['sl'],2)}
 
@@ -695,24 +706,44 @@ f"""📊 {sym}
 
             )
 
-    radar_only = []
+    # ================= RADAR WAITING =================
+
+    radar_waiting = []
 
     for k, r in radar_history.items():
 
         if r["symbol"] not in trades:
 
-            radar_only.append(
-
-                f"{r['time']}  "
-                f"{r['symbol']}"
-
+            radar_waiting.append(
+                (
+                    r["time"],
+                    r["symbol"]
+                )
             )
 
-    if radar_only:
+    if radar_waiting:
+
+        radar_waiting = sorted(
+            radar_waiting,
+            key=lambda x: datetime.datetime.strptime(
+                x[0],
+                "%H:%M"
+            )
+        )
 
         out.append("\n📡 RADAR WAITING\n")
 
-        out.extend(radar_only)
+        current_time = ""
+
+        for t, sym in radar_waiting:
+
+            if t != current_time:
+
+                current_time = t
+
+                out.append(f"\n⏰ {t}")
+
+            out.append(f"• {sym}")
 
     if not out:
 
@@ -724,15 +755,13 @@ f"""📊 {sym}
 
 def loop():
 
-    ist = pytz.timezone("Asia/Kolkata")
-
     last = None
 
     while True:
 
         try:
 
-            now = datetime.datetime.now(ist)
+            now = datetime.datetime.now(IST)
 
             if (
                 datetime.time(9,15)
@@ -749,6 +778,8 @@ def loop():
                     if key != last:
 
                         last = key
+
+                        print("🔄 RUNNING ENTRY + RESULT")
 
                         entry()
 
@@ -916,7 +947,7 @@ def webhook():
 
             asyncio.run(
                 send(
-                    "🛑 STOP COMMAND RECEIVED"
+                    "🛑 SCAN STOPPED"
                 )
             )
 
@@ -933,6 +964,8 @@ def webhook():
                 msg = "✅ IDLE"
 
             asyncio.run(send(msg))
+
+        # ================= INVALID =================
 
         else:
 
