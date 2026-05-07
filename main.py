@@ -22,7 +22,7 @@ PASSWORD = "2329"
 TOTP_SECRET = "3QCEGXTQKFN6BNHP76N7P3QZAY"
 
 TOKEN = "8602800906:AAHTYNJ-96TXL6Mi8xDvS5VRw1ewy_sDBXY"
-CHAT_ID = 309248606 
+CHAT_ID = 309248606
 
 bot = Bot(token=TOKEN)
 
@@ -42,11 +42,9 @@ scan_running = False
 
 active_radar = {}
 trades = {}
-radar_history = {}
 
 live_price = {}
-
-IST = pytz.timezone("Asia/Kolkata")
+radar_history = {}
 
 # ================= LOGIN =================
 
@@ -191,9 +189,11 @@ def refresh_tokens():
     global TOKENS
     global TOKEN_MAP
 
+    ist = pytz.timezone("Asia/Kolkata")
+
     while True:
 
-        now = datetime.datetime.now(IST)
+        now = datetime.datetime.now(ist)
 
         if now.hour == 8 and now.minute == 45:
 
@@ -213,7 +213,9 @@ def get_candle_data(token, interval):
 
     try:
 
-        now = datetime.datetime.now(IST)
+        ist = pytz.timezone("Asia/Kolkata")
+
+        now = datetime.datetime.now(ist)
 
         from_date = (
             now -
@@ -268,20 +270,6 @@ def get_candle_data(token, interval):
 
         return None
 
-# ================= MARKET TIME FILTER =================
-
-def valid_radar_time(candle_time):
-
-    t = candle_time.time()
-
-    return (
-        datetime.time(9, 30)
-        <=
-        t
-        <=
-        datetime.time(14, 30)
-    )
-
 # ================= RADAR =================
 
 def radar():
@@ -292,10 +280,10 @@ def radar():
 
         scan_running = True
 
+        count = 0
+
         radar_history.clear()
         active_radar.clear()
-
-        count = 0
 
         print("📡 RUNNING RADAR...")
 
@@ -333,7 +321,17 @@ def radar():
 
                     candle_time = row["time"]
 
-                    if not valid_radar_time(candle_time):
+                    # ================= TIME FILTER =================
+
+                    market_time = candle_time.time()
+
+                    if not (
+                        datetime.time(9, 30)
+                        <=
+                        market_time
+                        <=
+                        datetime.time(13, 30)
+                    ):
                         continue
 
                     # ================= CONDITIONS =================
@@ -424,10 +422,8 @@ def radar():
 
                         key = (
                             sym
-                            +
-                            "_"
-                            +
-                            candle_time.strftime("%H:%M")
+                            + "_"
+                            + candle_time.strftime("%H:%M")
                         )
 
                         if key in radar_history:
@@ -442,13 +438,13 @@ def radar():
                                 candle_time.strftime("%H:%M"),
 
                             "high":
-                                float(row["high"]),
+                                row["high"],
 
                             "low":
-                                float(row["low"]),
+                                row["low"],
 
                             "close":
-                                float(row["close"])
+                                row["close"]
 
                         }
 
@@ -499,9 +495,11 @@ def radar():
 
             for t in sorted_times:
 
+                stocks = sorted(time_map[t])
+
                 msg += f"⏰ {t}\n"
 
-                for s in sorted(time_map[t]):
+                for s in stocks:
 
                     msg += f"• {s}\n"
 
@@ -519,16 +517,18 @@ def radar():
 
 def entry():
 
-    now = datetime.datetime.now(IST)
+    now = datetime.datetime.now(
+        pytz.timezone("Asia/Kolkata")
+    )
 
-    # ENTRY TIME ONLY 9:30 TO 14:30
+    # ================= ENTRY TIME =================
 
     if not (
         datetime.time(9,30)
         <=
         now.time()
         <=
-        datetime.time(14,30)
+        datetime.time(13,30)
     ):
         return
 
@@ -574,25 +574,25 @@ def entry():
                     r["time"],
 
                 "entry":
-                    now.strftime("%H:%M"),
+                    last["time"].strftime("%H:%M"),
 
                 "entry_price":
-                    float(last["close"]),
+                    last["close"],
 
                 "sl":
                     min(
-                        float(prev["low"]),
-                        float(r["low"])
+                        prev["low"],
+                        r["low"]
                     ),
 
                 "tgt":
-                    float(last["close"]) +
+                    last["close"] +
                     (
-                        float(last["close"])
+                        last["close"]
                         -
                         min(
-                            float(prev["low"]),
-                            float(r["low"])
+                            prev["low"],
+                            r["low"]
                         )
                     ),
 
@@ -604,10 +604,10 @@ def entry():
             asyncio.run(
                 send(
                     f"🚀 ENTRY ALERT\n\n"
-                    f"📊 STOCK: {sym}\n"
-                    f"📡 RADAR: {r['time']}\n"
-                    f"🚀 ENTRY: {now.strftime('%H:%M')}\n"
-                    f"💰 PRICE: {round(last['close'],2)}"
+                    f"STOCK: {sym}\n"
+                    f"RADAR: {r['time']}\n"
+                    f"ENTRY: {last['time'].strftime('%H:%M')}\n"
+                    f"PRICE: {round(last['close'],2)}"
                 )
             )
 
@@ -615,9 +615,11 @@ def entry():
 
 def result():
 
-    now = datetime.datetime.now(IST)
+    now = datetime.datetime.now(
+        pytz.timezone("Asia/Kolkata")
+    )
 
-    # RESULT CHECK 9:30 TO 15:30
+    # ================= RESULT TIME =================
 
     if not (
         datetime.time(9,30)
@@ -652,7 +654,7 @@ def result():
             asyncio.run(
                 send(
                     f"❌ SL HIT\n\n"
-                    f"📊 STOCK: {sym}"
+                    f"STOCK: {sym}"
                 )
             )
 
@@ -663,7 +665,7 @@ def result():
             asyncio.run(
                 send(
                     f"🎯 TARGET HIT\n\n"
-                    f"📊 STOCK: {sym}"
+                    f"STOCK: {sym}"
                 )
             )
 
@@ -681,7 +683,10 @@ def report():
 
         sorted_trades = sorted(
             trades.items(),
-            key=lambda x: x[1]["entry"]
+            key=lambda x: datetime.datetime.strptime(
+                x[1]["entry"],
+                "%H:%M"
+            )
         )
 
         for sym, t in sorted_trades:
@@ -694,7 +699,7 @@ f"""📊 {sym}
 
 🚀 ENTRY: {t['entry']}
 
-💰 ENTRY PRICE: {round(t['entry_price'],2)}
+💰 ENTRY: {round(t['entry_price'],2)}
 
 🛑 SL: {round(t['sl'],2)}
 
@@ -708,42 +713,38 @@ f"""📊 {sym}
 
     # ================= RADAR WAITING =================
 
-    radar_waiting = []
+    radar_waiting = {}
 
     for k, r in radar_history.items():
 
         if r["symbol"] not in trades:
 
-            radar_waiting.append(
-                (
-                    r["time"],
-                    r["symbol"]
-                )
-            )
+            t = r["time"]
+
+            if t not in radar_waiting:
+                radar_waiting[t] = []
+
+            radar_waiting[t].append(r["symbol"])
 
     if radar_waiting:
 
-        radar_waiting = sorted(
-            radar_waiting,
+        out.append("\n📡 RADAR WAITING\n")
+
+        sorted_times = sorted(
+            radar_waiting.keys(),
             key=lambda x: datetime.datetime.strptime(
-                x[0],
+                x,
                 "%H:%M"
             )
         )
 
-        out.append("\n📡 RADAR WAITING\n")
+        for t in sorted_times:
 
-        current_time = ""
+            out.append(f"\n⏰ {t}")
 
-        for t, sym in radar_waiting:
+            for s in sorted(radar_waiting[t]):
 
-            if t != current_time:
-
-                current_time = t
-
-                out.append(f"\n⏰ {t}")
-
-            out.append(f"• {sym}")
+                out.append(f"• {s}")
 
     if not out:
 
@@ -755,13 +756,15 @@ f"""📊 {sym}
 
 def loop():
 
+    ist = pytz.timezone("Asia/Kolkata")
+
     last = None
 
     while True:
 
         try:
 
-            now = datetime.datetime.now(IST)
+            now = datetime.datetime.now(ist)
 
             if (
                 datetime.time(9,15)
@@ -778,8 +781,6 @@ def loop():
                     if key != last:
 
                         last = key
-
-                        print("🔄 RUNNING ENTRY + RESULT")
 
                         entry()
 
@@ -947,7 +948,7 @@ def webhook():
 
             asyncio.run(
                 send(
-                    "🛑 SCAN STOPPED"
+                    "🛑 STOP COMMAND RECEIVED"
                 )
             )
 
