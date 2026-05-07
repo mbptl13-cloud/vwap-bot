@@ -967,7 +967,7 @@ def webhook():
             else:
 
                 threading.Thread(
-                    target=,
+                    target=radar,
                     daemon=True
                 ).start()
 
