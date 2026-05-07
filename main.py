@@ -342,7 +342,7 @@ def radar():
                     if candle_time.hour == 9 and candle_time.minute < 30:
                         continue
 
-                    if candle_time.hour > 15:
+                    if candle_time.hour > 14:
                         continue
 
                     # ================= CONDITIONS =================
