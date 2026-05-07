@@ -287,10 +287,10 @@ def socket():
         try:
             sws = SmartWebSocketV2(API_KEY, CLIENT_ID, FEED_TOKEN, JWT)
 
-            tokens = list(TOKENS.values())
-
             def on_open(ws):
                 print("🔌 Connected")
+
+                tokens = list(TOKENS.values())[:150]  # HARD LIMIT FIX
 
                 subscribe_dynamic(sws, tokens)
 
@@ -305,23 +305,15 @@ def socket():
                 except:
                     pass
 
-            def on_error(ws, error):
-                print("❌ WS Error:", error)
-
-            def on_close(ws):
-                print("⚠️ WS Closed")
-
             sws.on_open = on_open
             sws.on_data = on_data
-            sws.on_error = on_error
-            sws.on_close = on_close
 
             sws.connect()
 
         except Exception as e:
-            print("❌ Socket crashed → restarting:", e)
+            print("❌ Socket restart:", e)
             time.sleep(5)
-
+            
 def refresh_live_data():
     radar()
     entry()
