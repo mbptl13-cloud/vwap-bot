@@ -40,11 +40,11 @@ angel = None
 
 scan_running = False
 
-active_ = {}
+active_radar = {}
 trades = {}
 
 live_price = {}
-_history = {}
+radar_history = {}
 
 # ================= LOGIN =================
 
@@ -121,11 +121,13 @@ def get_fno_tokens():
 
     try:
 
-        data = requests.get(
+        response = requests.get(
             url,
             headers=headers,
             timeout=30
-        ).json()
+        )
+
+        data = response.json()
 
     except Exception as e:
 
@@ -193,17 +195,25 @@ def refresh_tokens():
 
     while True:
 
-        now = datetime.datetime.now(ist)
+        try:
 
-        if now.hour == 8 and now.minute == 45:
+            now = datetime.datetime.now(ist)
 
-            TOKENS, TOKEN_MAP = get_fno_tokens()
+            if now.hour == 8 and now.minute == 45:
 
-            print("🔁 TOKENS UPDATED")
+                TOKENS, TOKEN_MAP = get_fno_tokens()
 
-            time.sleep(60)
+                print("🔁 TOKENS UPDATED")
 
-        time.sleep(20)
+                time.sleep(60)
+
+            time.sleep(20)
+
+        except Exception as e:
+
+            print("❌ REFRESH:", e)
+
+            time.sleep(20)
 
 # ================= CANDLE DATA =================
 
@@ -270,9 +280,10 @@ def get_candle_data(token, interval):
 
         return None
 
-# =================RADAR CHECK=================
+# ================= RADAR =================
 
 def radar():
+
     global scan_running
     global radar_history
     global active_radar
@@ -328,22 +339,20 @@ def radar():
 
                     # ================= TODAY FILTER =================
 
-                    candle_date = candle_time.date()
-
-                    if candle_date != today:
+                    if candle_time.date() != today:
                         continue
 
-                   # ================= MARKET TIME FILTER =================
+                    # ================= RADAR TIME FILTER =================
 
                     if candle_time.hour < 9:
                         continue
-                    
+
                     if candle_time.hour == 9 and candle_time.minute < 45:
                         continue
-                    
+
                     if candle_time.hour > 13:
                         continue
-                    
+
                     if candle_time.hour == 13 and candle_time.minute > 30:
                         continue
 
@@ -355,8 +364,7 @@ def radar():
 
                     turnover_cond = (
                         (
-                            row["close"]
-                            *
+                            row["close"] *
                             row["volume"]
                         ) > 15000000
                     )
@@ -364,11 +372,9 @@ def radar():
                     range_percent = (
                         (
                             (
-                                row["high"]
-                                -
+                                row["high"] -
                                 row["low"]
-                            )
-                            /
+                            ) /
                             row["open"]
                         ) * 100
                     )
@@ -380,11 +386,9 @@ def radar():
                     body_percent = (
                         (
                             abs(
-                                row["close"]
-                                -
+                                row["close"] -
                                 row["open"]
-                            )
-                            /
+                            ) /
                             row["open"]
                         ) * 100
                     )
@@ -394,22 +398,19 @@ def radar():
                     )
 
                     vwap_cond = (
-                        row["close"]
-                        >
+                        row["close"] >
                         row["vwap"]
                     )
 
                     volume_blast_cond = (
-                        row["volume"]
-                        >
+                        row["volume"] >
                         (
                             row["vol_sma20"] * 2
                         )
                     )
 
                     bullish_cond = (
-                        row["close"]
-                        >
+                        row["close"] >
                         row["open"]
                     )
 
@@ -434,10 +435,8 @@ def radar():
                     ):
 
                         key = (
-                            sym
-                            +
-                            "_"
-                            +
+                            sym +
+                            "_" +
                             candle_time.strftime("%H:%M")
                         )
 
@@ -510,11 +509,9 @@ def radar():
 
             for t in sorted_times:
 
-                stocks = sorted(time_map[t])
-
                 msg += f"⏰ {t}\n"
 
-                for s in stocks:
+                for s in sorted(time_map[t]):
 
                     msg += f"• {s}\n"
 
@@ -526,7 +523,7 @@ def radar():
 
         scan_running = False
 
-        print("❌  ERROR:", e)
+        print("❌ RADAR ERROR:", e)
 
 # ================= ENTRY =================
 
@@ -547,8 +544,6 @@ def entry():
     ):
         return
 
-    current_time = now.strftime("%H:%M")
-
     for sym in active_radar:
 
         if sym in trades:
@@ -561,7 +556,7 @@ def entry():
             "%H:%M"
         ).time()
 
-        # ================= RADAR TIME FILTER =================
+        # ================= RADAR FILTER =================
 
         if not (
             datetime.time(9,45)
@@ -584,7 +579,6 @@ def entry():
             datetime.timedelta(minutes=15)
         ).time()
 
-        # entry only after radar candle close
         if now.time() < next_allowed_entry:
             continue
 
@@ -606,7 +600,7 @@ def entry():
         last = df.iloc[-1]
         prev = df.iloc[-2]
 
-        # ================= ORIGINAL 5M CONDITION =================
+        # ================= ENTRY CONDITION =================
 
         if (
             last["close"] > last["vwap"]
@@ -637,8 +631,7 @@ def entry():
                 "tgt":
                     last["close"] +
                     (
-                        last["close"]
-                        -
+                        last["close"] -
                         min(
                             prev["low"],
                             r["low"]
@@ -659,6 +652,7 @@ def entry():
                     f"PRICE: {round(last['close'],2)}"
                 )
             )
+
 # ================= RESULT =================
 
 def result():
@@ -728,7 +722,7 @@ def report():
 
 f"""📊 {sym}
 
-📡 : {t['']}
+📡 RADAR: {t['radar']}
 
 🚀 ENTRY: {t['entry']}
 
@@ -744,11 +738,11 @@ f"""📊 {sym}
 
             )
 
-    # =================  WAITING =================
+    # ================= RADAR WAITING =================
 
     waiting_map = {}
 
-    for k, r in _history.items():
+    for k, r in radar_history.items():
 
         if r["symbol"] not in trades:
 
@@ -763,7 +757,7 @@ f"""📊 {sym}
 
     if waiting_map:
 
-        out.append("\n📡  WAITING\n")
+        out.append("\n📡 RADAR WAITING\n")
 
         sorted_times = sorted(
             waiting_map.keys(),
@@ -781,7 +775,7 @@ f"""📊 {sym}
 
                 out.append(f"• {sym}")
 
-    # ================= NO SIGNAL =================
+    # ================= EMPTY =================
 
     if not out:
 
@@ -802,6 +796,8 @@ def loop():
         try:
 
             now = datetime.datetime.now(ist)
+
+            # ================= RESULT CHECK TILL 15:30 =================
 
             if (
                 datetime.time(9,15)
@@ -902,7 +898,6 @@ def socket():
                     pass
 
             sws.on_open = on_open
-
             sws.on_data = on_data
 
             sws.connect()
@@ -952,9 +947,9 @@ def webhook():
 
             asyncio.run(send(msg))
 
-        # =================  =================
+        # ================= RADAR =================
 
-        elif text == "":
+        elif text == "RADAR":
 
             if scan_running:
 
@@ -973,7 +968,7 @@ def webhook():
 
                 asyncio.run(
                     send(
-                        "📡  SCAN STARTED"
+                        "📡 RADAR SCAN STARTED"
                     )
                 )
 
@@ -1003,12 +998,14 @@ def webhook():
 
             asyncio.run(send(msg))
 
+        # ================= UNKNOWN =================
+
         else:
 
             asyncio.run(
                 send(
                     "AVAILABLE COMMANDS:\n\n"
-                    "\n"
+                    "RADAR\n"
                     "LIVE\n"
                     "STOP\n"
                     "STATUS"
