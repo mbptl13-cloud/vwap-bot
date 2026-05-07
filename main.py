@@ -67,9 +67,10 @@ def login():
 
 
 # ================= TOKEN FETCH =================
+# ================= FNO TOKEN FETCH =================
 def get_fno_tokens():
 
-    print("🔄 Fetching Tokens...")
+    print("🔄 Fetching ONLY FNO Stocks...")
 
     url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
 
@@ -90,6 +91,28 @@ def get_fno_tokens():
         print("❌ TOKEN ERROR:", e)
         return {}, {}
 
+    # ================= FIND FNO SYMBOLS =================
+
+    fno_symbols = set()
+
+    for i in data:
+
+        try:
+
+            if i.get("exch_seg") == "NFO":
+
+                name = i.get("name")
+
+                if name:
+                    fno_symbols.add(name)
+
+        except:
+            pass
+
+    print(f"✅ FNO SYMBOLS: {len(fno_symbols)}")
+
+    # ================= GET NSE EQ TOKENS =================
+
     tokens = {}
     token_map = {}
 
@@ -104,6 +127,11 @@ def get_fno_tokens():
             ):
 
                 sym = i["symbol"].replace("-EQ", "")
+
+                # ONLY FNO STOCKS
+                if sym not in fno_symbols:
+                    continue
+
                 tok = str(i["token"])
 
                 tokens[sym] = tok
@@ -112,10 +140,9 @@ def get_fno_tokens():
         except:
             pass
 
-    print(f"✅ Tokens Loaded: {len(tokens)}")
+    print(f"✅ FINAL FNO STOCKS: {len(tokens)}")
 
     return tokens, token_map
-
 
 # ================= VWAP =================
 def vwap(df):
