@@ -724,7 +724,9 @@ f"""📊 {sym}
             if t not in radar_waiting:
                 radar_waiting[t] = []
 
-            radar_waiting[t].append(r["symbol"])
+            radar_waiting[t].append(
+                r["symbol"]
+            )
 
     if radar_waiting:
 
@@ -742,16 +744,17 @@ f"""📊 {sym}
 
             out.append(f"\n⏰ {t}")
 
-            for s in sorted(radar_waiting[t]):
+            for sym in sorted(radar_waiting[t]):
 
-                out.append(f"• {s}")
+                out.append(f"• {sym}")
+
+    # ================= NO SIGNAL =================
 
     if not out:
 
         return "❌ NO SIGNALS TODAY"
 
     return "\n".join(out)
-
 # ================= LOOP =================
 
 def loop():
