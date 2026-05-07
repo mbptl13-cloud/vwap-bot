@@ -21,6 +21,12 @@ app = Flask(__name__)
 # ================= GLOBAL =================
 TOKENS = {}
 FEED_TOKEN = None
+JWT = None
+
+candles_15m = {}
+candles_5m = {}
+active_radar = {}
+trades = {}
 
 # ================= SAFE REQUEST =================
 def safe_json(session, url, headers, retries=3):
@@ -29,21 +35,17 @@ def safe_json(session, url, headers, retries=3):
             r = session.get(url, headers=headers, timeout=10)
 
             if r.status_code != 200:
-                print("❌ HTTP:", r.status_code)
                 time.sleep(1)
                 continue
 
             text = r.text.strip()
-
             if not text or text.startswith("<"):
-                print("❌ Blocked/HTML response")
                 time.sleep(1)
                 continue
 
             return r.json()
 
-        except Exception as e:
-            print("❌ JSON error:", e)
+        except:
             time.sleep(1)
 
     return None
@@ -58,28 +60,21 @@ def login():
 
     data = obj.generateSession(CLIENT_ID, PASSWORD, totp)
 
-    print("LOGIN RESPONSE:", data)
-
     feed = data["data"]["feedToken"]
     jwt = data["data"]["jwtToken"]
 
     return obj, feed, jwt
 
 
-# ================= NSE TOKEN FETCH =================
+# ================= TOKEN FETCH =================
 def get_fno_tokens():
-    print("🔄 Fetching FNO + Tokens (STABLE MODE)...")
+    print("🔄 Fetching FNO + Tokens...")
 
     url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
 
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
-
     try:
-        data = requests.get(url, headers=headers, timeout=20).json()
-    except Exception as e:
-        print("❌ Token master failed:", e)
+        data = requests.get(url, timeout=20).json()
+    except:
         return {}
 
     tokens = {}
@@ -92,57 +87,18 @@ def get_fno_tokens():
         except:
             continue
 
-    print(f"✅ Tokens Loaded: {len(tokens)}")
+    print("✅ Tokens Loaded:", len(tokens))
     return tokens
 
-# ================= REFRESH TOKENS =================
-def refresh_tokens():
-    global TOKENS
-    ist = pytz.timezone("Asia/Kolkata")
 
-    while True:
-        now = datetime.datetime.now(ist)
-
-        if now.hour == 8 and now.minute == 45:
-            TOKENS = get_fno_tokens()
-            print("🔁 TOKENS UPDATED")
-            time.sleep(60)
-
-        time.sleep(20)
-
-
-# ================= STORAGE =================
-candles_15m = {}
-candles_5m = {}
-active_radar = {}
-trades = {}
-
-
-# ================= TELEGRAM =================
-async def send(msg):
-    try:
-        await bot.send_message(chat_id=CHAT_ID, text=msg)
-    except:
-        pass
-
-
-# ================= VWAP =================
-def vwap(df):
-    df["tp"] = (df["high"] + df["low"] + df["close"]) / 3
-    df["cv"] = df["volume"].cumsum()
-    df["cpv"] = (df["tp"] * df["volume"]).cumsum()
-    df["vwap"] = df["cpv"] / df["cv"]
-    return df
-
-
-# ================= CANDLE UPDATE =================
+# ================= UPDATE CANDLES =================
 def update(symbol, price):
     now = datetime.datetime.now(pytz.timezone("Asia/Kolkata"))
 
     t15 = now.replace(minute=(now.minute // 15) * 15, second=0, microsecond=0)
     t5 = now.replace(minute=(now.minute // 5) * 5, second=0, microsecond=0)
 
-    for tf, store, t in [(15, candles_15m, t15), (5, candles_5m, t5)]:
+    for store, t in [(candles_15m, t15), (candles_5m, t5)]:
         store.setdefault(symbol, [])
 
         if not store[symbol] or store[symbol][-1]["time"] != t:
@@ -162,9 +118,19 @@ def update(symbol, price):
             c["volume"] += 1
 
 
-# ================= RADAR =================
+# ================= VWAP =================
+def vwap(df):
+    df["tp"] = (df["high"] + df["low"] + df["close"]) / 3
+    df["cv"] = df["volume"].cumsum()
+    df["cpv"] = (df["tp"] * df["volume"]).cumsum()
+    df["vwap"] = df["cpv"] / df["cv"]
+    return df
+
+
+# ================= RADAR (UNCHANGED LOGIC) =================
 def radar():
     for sym in candles_15m:
+
         df = pd.DataFrame(candles_15m.get(sym, []))
         if len(df) < 5:
             continue
@@ -180,14 +146,15 @@ def radar():
             }
 
 
-# ================= ENTRY =================
+# ================= ENTRY (UNCHANGED LOGIC) =================
 def entry():
     now = datetime.datetime.now(pytz.timezone("Asia/Kolkata"))
 
     if not (datetime.time(9, 45) <= now.time() <= datetime.time(13, 30)):
         return
 
-    for sym in active_radar:
+    for sym in list(active_radar.keys()):
+
         if sym in trades:
             continue
 
@@ -214,6 +181,7 @@ def entry():
 # ================= RESULT =================
 def result():
     for sym, t in trades.items():
+
         if t["status"] != "OPEN":
             continue
 
@@ -228,29 +196,8 @@ def result():
         elif last["high"] >= t["tgt"]:
             t["status"] = "WIN"
 
-# ================= REPORT =================
-def report():
-    result_text = []
 
-    if not trades:
-        return "❌ NO TRADES TODAY"
-
-    for sym, t in trades.items():
-        result_text.append(
-f"""📊 STOCK: {sym}
-📅 DATE: {t['date']}
-📡 RADAR: {t['radar']}
-🚀 ENTRY: {t['entry']}
-💰 ENTRY PRICE: {round(t['entry_price'], 2)}
-🛑 SL: {round(t['sl'], 2)}
-🎯 TARGET: {round(t['tgt'], 2)}
-📌 STATUS: {t['status']}
-----------------------"""
-        )
-
-    return "\n".join(result_text)
-
-# ================= LOOP =================
+# ================= LOOP (FIXED START RADAR BUG) =================
 def loop():
     ist = pytz.timezone("Asia/Kolkata")
     last = None
@@ -260,28 +207,22 @@ def loop():
 
         if datetime.time(9, 15) <= now.time() <= datetime.time(15, 30):
 
+            radar()   # 🔥 ALWAYS RUN FIRST (FIX)
+
             if now.minute % 5 == 0:
                 key = now.strftime("%H:%M")
                 if key != last:
                     last = key
-                    radar()
 
             entry()
             result()
 
         time.sleep(3)
 
-def subscribe_dynamic(sws, tokens):
-    batch_size = 50
 
-    for i in range(0, len(tokens), batch_size):
-        sws.subscribe([
-            {"exchangeType": 1, "tokens": tokens[i:i+batch_size]}
-        ])
-        time.sleep(0.5)
 # ================= SOCKET =================
 def socket():
-    global FEED_TOKEN, JWT
+    global FEED_TOKEN, JWT, TOKENS
 
     while True:
         try:
@@ -290,9 +231,14 @@ def socket():
             def on_open(ws):
                 print("🔌 Connected")
 
-                tokens = list(TOKENS.values())[:150]  # HARD LIMIT FIX
+                tokens = list(TOKENS.values())[:150]
 
-                subscribe_dynamic(sws, tokens)
+                batch = 50
+                for i in range(0, len(tokens), batch):
+                    sws.subscribe([
+                        {"exchangeType": 1, "tokens": tokens[i:i+batch]}
+                    ])
+                    time.sleep(0.3)
 
             def on_data(ws, msg):
                 try:
@@ -307,50 +253,72 @@ def socket():
 
             sws.on_open = on_open
             sws.on_data = on_data
-
             sws.connect()
 
         except Exception as e:
             print("❌ Socket restart:", e)
             time.sleep(5)
-            
+
+
+# ================= REPORT =================
+def report():
+    if not trades:
+        return "❌ NO TRADES TODAY"
+
+    out = []
+    for sym, t in trades.items():
+        out.append(f"""
+📊 STOCK: {sym}
+📅 DATE: {t['date']}
+📡 RADAR: {t['radar']}
+🚀 ENTRY: {t['entry']}
+💰 ENTRY PRICE: {round(t['entry_price'],2)}
+🛑 SL: {round(t['sl'],2)}
+🎯 TARGET: {round(t['tgt'],2)}
+📌 STATUS: {t['status']}
+------------------
+""")
+    return "\n".join(out)
+
+
+# ================= REFRESH =================
 def refresh_live_data():
     radar()
     entry()
     result()
-# ================= TELEGRAM WEBHOOK =================
+
+
+# ================= TELEGRAM =================
+async def send(msg):
+    try:
+        await bot.send_message(chat_id=CHAT_ID, text=msg)
+    except:
+        pass
+
+
 @app.route("/", methods=["POST"])
 def webhook():
     try:
         data = request.get_json()
-
-        if not data:
-            return "no data", 200
-
-        message = data.get("message", {})
-        text = message.get("text", "").strip().upper()
-
-        print("📩 TELEGRAM MSG:", text)
+        text = data.get("message", {}).get("text", "").upper()
 
         if text == "LIVE":
-
             refresh_live_data()
             msg = report()
 
         elif text == "RADAR":
-
             msg = str(active_radar)
 
         else:
             msg = "INVALID COMMAND"
 
         asyncio.run(send(msg))
-
         return "ok", 200
 
     except Exception as e:
-        print("❌ WEBHOOK ERROR:", e)
+        print("ERROR:", e)
         return "error", 200
+
 
 @app.route("/", methods=["GET"])
 def home():
@@ -362,20 +330,13 @@ if __name__ == "__main__":
 
     print("🚀 BOT STARTING...")
 
-    try:
-        angel, FEED_TOKEN, JWT = login()
-        print("✅ LOGIN SUCCESS")
+    angel, FEED_TOKEN, JWT = login()
 
-        TOKENS = get_fno_tokens()
+    TOKENS = get_fno_tokens()
 
-        threading.Thread(target=socket, daemon=True).start()
-        threading.Thread(target=loop, daemon=True).start()
-        threading.Thread(target=refresh_tokens, daemon=True).start()
+    threading.Thread(target=socket, daemon=True).start()
+    threading.Thread(target=loop, daemon=True).start()
 
-        print("🔌 SYSTEM RUNNING")
+    print("🔌 SYSTEM RUNNING")
 
-        port = int(os.environ.get("PORT", 10000))
-        app.run(host="0.0.0.0", port=port)
-
-    except Exception as e:
-        print("❌ CRASH:", e)
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
