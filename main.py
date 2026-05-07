@@ -347,7 +347,7 @@ def radar():
                     if candle_time.hour < 9:
                         continue
 
-                    if candle_time.hour == 9 and candle_time.minute < 45:
+                    if candle_time.hour == 9 and candle_time.minute < 30:
                         continue
 
                     if candle_time.hour > 13:
@@ -559,7 +559,7 @@ def entry():
         # ================= RADAR FILTER =================
 
         if not (
-            datetime.time(9,45)
+            datetime.time(9,30)
             <=
             radar_time
             <=
