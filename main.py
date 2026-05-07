@@ -228,6 +228,27 @@ def result():
         elif last["high"] >= t["tgt"]:
             t["status"] = "WIN"
 
+# ================= REPORT =================
+def report():
+    result_text = []
+
+    if not trades:
+        return "❌ NO TRADES TODAY"
+
+    for sym, t in trades.items():
+        result_text.append(
+f"""📊 STOCK: {sym}
+📅 DATE: {t['date']}
+📡 RADAR: {t['radar']}
+🚀 ENTRY: {t['entry']}
+💰 ENTRY PRICE: {round(t['entry_price'], 2)}
+🛑 SL: {round(t['sl'], 2)}
+🎯 TARGET: {round(t['tgt'], 2)}
+📌 STATUS: {t['status']}
+----------------------"""
+        )
+
+    return "\n".join(result_text)
 
 # ================= LOOP =================
 def loop():
@@ -293,17 +314,28 @@ def socket():
         except Exception as e:
             print("❌ Socket crashed → restarting:", e)
             time.sleep(5)
+
+def refresh_live_data():
+    radar()
+    entry()
+    result()
 # ================= TELEGRAM WEBHOOK =================
-@app.route("/", methods=["GET"])
-def home():
-    return "BOT RUNNING", 200
+@app.route("/", methods=["POST"])
+def webhook():
+    text = request.json["message"]["text"].strip().upper()
 
     if text == "LIVE":
-        msg = str(trades)
+
+        # 🔥 force latest scan
+        refresh_live_data()
+
+        msg = report()
+
     elif text == "RADAR":
         msg = str(active_radar)
+
     else:
-        msg = "INVALID"
+        msg = "INVALID COMMAND"
 
     asyncio.run(send(msg))
     return "ok"
