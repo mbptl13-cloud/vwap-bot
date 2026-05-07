@@ -260,7 +260,7 @@ def loop():
 
         if datetime.time(9, 15) <= now.time() <= datetime.time(15, 30):
 
-            if now.minute % 15 == 1:
+            if now.minute % 5 == 0:
                 key = now.strftime("%H:%M")
                 if key != last:
                     last = key
