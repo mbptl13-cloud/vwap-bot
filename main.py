@@ -16,13 +16,13 @@ from flask import Flask, request
 
 # ================= CONFIG =================
 
-API_KEY = "ccsipvbP"
-CLIENT_ID = "M50717452"
-PASSWORD = "2329"
-TOTP_SECRET = "3QCEGXTQKFN6BNHP76N7P3QZAY"
+API_KEY = ""
+CLIENT_ID = ""
+PASSWORD = ""
+TOTP_SECRET = ""
 
-TOKEN = "8602800906:AAHTYNJ-96TXL6Mi8xDvS5VRw1ewy_sDBXY"
-CHAT_ID = 309248606
+TOKEN = ""
+CHAT_ID = ""
 
 bot = Bot(token=TOKEN)
 
@@ -275,17 +275,23 @@ def get_candle_data(token, interval):
 def radar():
 
     global scan_running
+    global radar_history
+    global active_radar
 
     try:
 
         scan_running = True
 
+        radar_history = {}
+        active_radar = {}
+
         count = 0
 
-        radar_history.clear()
-        active_radar.clear()
-
         print("📡 RUNNING RADAR...")
+
+        ist = pytz.timezone("Asia/Kolkata")
+
+        today = datetime.datetime.now(ist).date()
 
         for sym, token in TOKENS.items():
 
@@ -315,23 +321,28 @@ def radar():
                     .mean()
                 )
 
-                for i in range(20, len(df)):
+                for i in range(len(df)):
 
                     row = df.iloc[i]
 
                     candle_time = row["time"]
 
-                    # ================= TIME FILTER =================
+                    # ================= TODAY FILTER =================
 
-                    market_time = candle_time.time()
+                    candle_date = candle_time.date()
 
-                    if not (
-                        datetime.time(9, 30)
-                        <=
-                        market_time
-                        <=
-                        datetime.time(13, 30)
-                    ):
+                    if candle_date != today:
+                        continue
+
+                    # ================= MARKET TIME FILTER =================
+
+                    if candle_time.hour < 9:
+                        continue
+
+                    if candle_time.hour == 9 and candle_time.minute < 30:
+                        continue
+
+                    if candle_time.hour > 15:
                         continue
 
                     # ================= CONDITIONS =================
@@ -422,8 +433,10 @@ def radar():
 
                         key = (
                             sym
-                            + "_"
-                            + candle_time.strftime("%H:%M")
+                            +
+                            "_"
+                            +
+                            candle_time.strftime("%H:%M")
                         )
 
                         if key in radar_history:
@@ -521,10 +534,8 @@ def entry():
         pytz.timezone("Asia/Kolkata")
     )
 
-    # ================= ENTRY TIME =================
-
     if not (
-        datetime.time(9,30)
+        datetime.time(9,45)
         <=
         now.time()
         <=
@@ -574,7 +585,7 @@ def entry():
                     r["time"],
 
                 "entry":
-                    last["time"].strftime("%H:%M"),
+                    now.strftime("%H:%M"),
 
                 "entry_price":
                     last["close"],
@@ -605,30 +616,13 @@ def entry():
                 send(
                     f"🚀 ENTRY ALERT\n\n"
                     f"STOCK: {sym}\n"
-                    f"RADAR: {r['time']}\n"
-                    f"ENTRY: {last['time'].strftime('%H:%M')}\n"
-                    f"PRICE: {round(last['close'],2)}"
+                    f"ENTRY: {round(last['close'],2)}"
                 )
             )
 
 # ================= RESULT =================
 
 def result():
-
-    now = datetime.datetime.now(
-        pytz.timezone("Asia/Kolkata")
-    )
-
-    # ================= RESULT TIME =================
-
-    if not (
-        datetime.time(9,30)
-        <=
-        now.time()
-        <=
-        datetime.time(15,30)
-    ):
-        return
 
     for sym, t in trades.items():
 
@@ -713,7 +707,7 @@ f"""📊 {sym}
 
     # ================= RADAR WAITING =================
 
-    radar_waiting = {}
+    waiting_map = {}
 
     for k, r in radar_history.items():
 
@@ -721,19 +715,19 @@ f"""📊 {sym}
 
             t = r["time"]
 
-            if t not in radar_waiting:
-                radar_waiting[t] = []
+            if t not in waiting_map:
+                waiting_map[t] = []
 
-            radar_waiting[t].append(
+            waiting_map[t].append(
                 r["symbol"]
             )
 
-    if radar_waiting:
+    if waiting_map:
 
         out.append("\n📡 RADAR WAITING\n")
 
         sorted_times = sorted(
-            radar_waiting.keys(),
+            waiting_map.keys(),
             key=lambda x: datetime.datetime.strptime(
                 x,
                 "%H:%M"
@@ -744,7 +738,7 @@ f"""📊 {sym}
 
             out.append(f"\n⏰ {t}")
 
-            for sym in sorted(radar_waiting[t]):
+            for sym in sorted(waiting_map[t]):
 
                 out.append(f"• {sym}")
 
@@ -755,6 +749,7 @@ f"""📊 {sym}
         return "❌ NO SIGNALS TODAY"
 
     return "\n".join(out)
+
 # ================= LOOP =================
 
 def loop():
@@ -968,8 +963,6 @@ def webhook():
                 msg = "✅ IDLE"
 
             asyncio.run(send(msg))
-
-        # ================= INVALID =================
 
         else:
 
