@@ -321,23 +321,36 @@ def refresh_live_data():
 # ================= TELEGRAM WEBHOOK =================
 @app.route("/", methods=["POST"])
 def webhook():
-    text = request.json["message"]["text"].strip().upper()
+    try:
+        data = request.get_json()
 
-    if text == "LIVE":
+        if not data:
+            return "no data", 200
 
-        # 🔥 force latest scan
-        refresh_live_data()
+        message = data.get("message", {})
+        text = message.get("text", "").strip().upper()
 
-        msg = report()
+        print("📩 TELEGRAM MSG:", text)
 
-    elif text == "RADAR":
-        msg = str(active_radar)
+        if text == "LIVE":
 
-    else:
-        msg = "INVALID COMMAND"
+            refresh_live_data()
+            msg = report()
 
-    asyncio.run(send(msg))
-    return "ok"
+        elif text == "RADAR":
+
+            msg = str(active_radar)
+
+        else:
+            msg = "INVALID COMMAND"
+
+        asyncio.run(send(msg))
+
+        return "ok", 200
+
+    except Exception as e:
+        print("❌ WEBHOOK ERROR:", e)
+        return "error", 200
 
 
 # ================= MAIN =================
