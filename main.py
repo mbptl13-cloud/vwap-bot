@@ -16,13 +16,13 @@ from flask import Flask, request
 
 # ================= CONFIG =================
 
-API_KEY = ""
-CLIENT_ID = ""
-PASSWORD = ""
-TOTP_SECRET = ""
+API_KEY = "ccsipvbP"
+CLIENT_ID = "M50717452"
+PASSWORD = "2329"
+TOTP_SECRET = "3QCEGXTQKFN6BNHP76N7P3QZAY"
 
-TOKEN = ""
-CHAT_ID = ""
+TOKEN = "8602800906:AAHTYNJ-96TXL6Mi8xDvS5VRw1ewy_sDBXY"
+CHAT_ID = 309248606
 
 bot = Bot(token=TOKEN)
 
