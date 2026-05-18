@@ -1,6 +1,7 @@
 import time
 import datetime
 import pytz
+import asyncio
 import threading
 import os
 import requests
@@ -13,9 +14,7 @@ from SmartApi.smartWebSocketV2 import SmartWebSocketV2
 from telegram import Bot
 from flask import Flask, request
 
-# =========================================================
-# CONFIG
-# =========================================================
+# ================= CONFIG =================
 
 API_KEY = "ccsipvbP"
 CLIENT_ID = "M50717452"
@@ -24,14 +23,11 @@ TOTP_SECRET = "3QCEGXTQKFN6BNHP76N7P3QZAY"
 
 TOKEN = "8944295593:AAHXYIQcXVr5BSt1ilwjUoKp59v9knVNG70"
 CHAT_ID = 309248606
-
 bot = Bot(token=TOKEN)
 
 app = Flask(__name__)
 
-# =========================================================
-# GLOBALS
-# =========================================================
+# ================= GLOBAL =================
 
 TOKENS = {}
 TOKEN_MAP = {}
@@ -49,68 +45,46 @@ trades = {}
 live_price = {}
 radar_history = {}
 
-# =========================================================
-# LOGIN
-# =========================================================
+# ================= LOGIN =================
 
 def login():
 
-    try:
+    print("🔐 Logging in...")
 
-        print("🔐 LOGGING IN...")
+    obj = SmartConnect(api_key=API_KEY)
 
-        obj = SmartConnect(api_key=API_KEY)
+    totp = pyotp.TOTP(TOTP_SECRET).now()
 
-        totp = pyotp.TOTP(TOTP_SECRET).now()
+    data = obj.generateSession(
+        CLIENT_ID,
+        PASSWORD,
+        totp
+    )
 
-        data = obj.generateSession(
-            CLIENT_ID,
-            PASSWORD,
-            totp
-        )
+    feed = data["data"]["feedToken"]
 
-        if not data.get("status"):
-            raise Exception(data)
+    jwt = data["data"]["jwtToken"]
 
-        feed = data["data"]["feedToken"]
-        jwt = data["data"]["jwtToken"]
+    return obj, feed, jwt
 
-        print("✅ LOGIN SUCCESS")
+# ================= TELEGRAM =================
 
-        return obj, feed, jwt
-
-    except Exception as e:
-
-        print("❌ LOGIN FAILED:", e)
-
-        raise e
-
-# =========================================================
-# TELEGRAM
-# =========================================================
-
-def send(msg):
+async def send(msg):
 
     try:
 
-        bot.send_message(
+        await bot.send_message(
             chat_id=CHAT_ID,
             text=msg
         )
 
-        print("📤 TELEGRAM SENT")
-
     except Exception as e:
 
-        print("❌ TELEGRAM ERROR:", e)
+        print("❌ TELEGRAM:", e)
 
-# =========================================================
-# VWAP
-# =========================================================
+# ================= VWAP =================
 
 def vwap(df):
-
-    df = df.copy()
 
     df["tp"] = (
         df["high"] +
@@ -132,18 +106,13 @@ def vwap(df):
 
     return df
 
-# =========================================================
-# FETCH FNO TOKENS
-# =========================================================
+# ================= FNO TOKEN FETCH =================
 
 def get_fno_tokens():
 
-    print("🔄 FETCHING FNO STOCKS...")
+    print("🔄 Fetching ONLY FNO Stocks...")
 
-    url = (
-        "https://margincalculator.angelbroking.com/"
-        "OpenAPI_File/files/OpenAPIScripMaster.json"
-    )
+    url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
 
     headers = {
         "User-Agent": "Mozilla/5.0"
@@ -161,19 +130,19 @@ def get_fno_tokens():
 
     except Exception as e:
 
-        print("❌ TOKEN FETCH ERROR:", e)
+        print("❌ TOKEN ERROR:", e)
 
         return {}, {}
 
     fno_symbols = set()
 
-    for item in data:
+    for i in data:
 
         try:
 
-            if item.get("exch_seg") == "NFO":
+            if i.get("exch_seg") == "NFO":
 
-                name = item.get("name")
+                name = i.get("name")
 
                 if name:
                     fno_symbols.add(name)
@@ -181,39 +150,40 @@ def get_fno_tokens():
         except:
             pass
 
+    print(f"✅ FNO SYMBOLS: {len(fno_symbols)}")
+
     tokens = {}
     token_map = {}
 
-    for item in data:
+    for i in data:
 
         try:
 
             if (
-                item.get("exch_seg") == "NSE"
+                i.get("exch_seg") == "NSE"
                 and
-                item.get("symbol", "").endswith("-EQ")
+                i.get("symbol", "").endswith("-EQ")
             ):
 
-                sym = item["symbol"].replace("-EQ", "")
+                sym = i["symbol"].replace("-EQ", "")
 
                 if sym not in fno_symbols:
                     continue
 
-                tok = str(item["token"])
+                tok = str(i["token"])
 
                 tokens[sym] = tok
+
                 token_map[tok] = sym
 
         except:
             pass
 
-    print(f"✅ TOTAL FNO STOCKS: {len(tokens)}")
+    print(f"✅ FINAL FNO STOCKS: {len(tokens)}")
 
     return tokens, token_map
 
-# =========================================================
-# REFRESH TOKENS DAILY
-# =========================================================
+# ================= REFRESH TOKENS =================
 
 def refresh_tokens():
 
@@ -232,7 +202,7 @@ def refresh_tokens():
 
                 TOKENS, TOKEN_MAP = get_fno_tokens()
 
-                print("🔁 TOKENS REFRESHED")
+                print("🔁 TOKENS UPDATED")
 
                 time.sleep(60)
 
@@ -240,13 +210,11 @@ def refresh_tokens():
 
         except Exception as e:
 
-            print("❌ REFRESH ERROR:", e)
+            print("❌ REFRESH:", e)
 
             time.sleep(20)
 
-# =========================================================
-# CANDLE DATA
-# =========================================================
+# ================= CANDLE DATA =================
 
 def get_candle_data(token, interval):
 
@@ -307,13 +275,11 @@ def get_candle_data(token, interval):
 
     except Exception as e:
 
-        print("❌ CANDLE ERROR:", e)
+        print("❌ CANDLE:", e)
 
         return None
 
-# =========================================================
-# RADAR SCAN
-# =========================================================
+# ================= RADAR =================
 
 def radar():
 
@@ -340,8 +306,7 @@ def radar():
 
             if not scan_running:
 
-                send("🛑 SCAN STOPPED")
-
+                asyncio.run(send("🛑 SCAN STOPPED"))
                 return
 
             try:
@@ -371,8 +336,12 @@ def radar():
 
                     candle_time = row["time"]
 
+                    # ================= TODAY FILTER =================
+
                     if candle_time.date() != today:
                         continue
+
+                    # ================= RADAR TIME FILTER =================
 
                     if candle_time.hour < 9:
                         continue
@@ -385,6 +354,8 @@ def radar():
 
                     if candle_time.hour == 13 and candle_time.minute > 30:
                         continue
+
+                    # ================= CONDITIONS =================
 
                     volume_cond = (
                         row["volume"] > 500000
@@ -399,23 +370,27 @@ def radar():
 
                     range_percent = (
                         (
-                            row["high"] -
-                            row["low"]
-                        ) /
-                        row["open"]
-                    ) * 100
+                            (
+                                row["high"] -
+                                row["low"]
+                            ) /
+                            row["open"]
+                        ) * 100
+                    )
 
                     range_cond = (
                         range_percent > 1
                     )
 
                     body_percent = (
-                        abs(
-                            row["close"] -
+                        (
+                            abs(
+                                row["close"] -
+                                row["open"]
+                            ) /
                             row["open"]
-                        ) /
-                        row["open"]
-                    ) * 100
+                        ) * 100
+                    )
 
                     body_cond = (
                         body_percent > 0.6
@@ -437,6 +412,8 @@ def radar():
                         row["close"] >
                         row["open"]
                     )
+
+                    # ================= FINAL RADAR =================
 
                     if (
 
@@ -496,19 +473,21 @@ def radar():
 
             except Exception as e:
 
-                print(f"❌ {sym} ERROR:", e)
+                print(f"❌ {sym}:", e)
 
         scan_running = False
 
         if count == 0:
 
-            send("❌ NO RADAR FOUND")
+            asyncio.run(
+                send("❌ NO RADAR FOUND")
+            )
 
         else:
 
             time_map = {}
 
-            for _, r in radar_history.items():
+            for k, r in radar_history.items():
 
                 t = r["time"]
 
@@ -537,7 +516,7 @@ def radar():
 
                 msg += "\n"
 
-            send(msg)
+            asyncio.run(send(msg))
 
     except Exception as e:
 
@@ -545,15 +524,15 @@ def radar():
 
         print("❌ RADAR ERROR:", e)
 
-# =========================================================
-# ENTRY
-# =========================================================
+# ================= ENTRY =================
 
 def entry():
 
     now = datetime.datetime.now(
         pytz.timezone("Asia/Kolkata")
     )
+
+    # ================= ENTRY TIME =================
 
     if not (
         datetime.time(9,45)
@@ -566,162 +545,163 @@ def entry():
 
     for sym in active_radar:
 
-        try:
+        if sym in trades:
+            continue
 
-            if sym in trades:
-                continue
+        r = active_radar[sym]
 
-            r = active_radar[sym]
+        radar_time = datetime.datetime.strptime(
+            r["time"],
+            "%H:%M"
+        ).time()
 
-            radar_time = datetime.datetime.strptime(
-                r["time"],
-                "%H:%M"
-            ).time()
+        # ================= RADAR FILTER =================
 
-            radar_dt = datetime.datetime.combine(
-                now.date(),
-                radar_time
-            )
+        if not (
+            datetime.time(9,30)
+            <=
+            radar_time
+            <=
+            datetime.time(13,30)
+        ):
+            continue
 
-            next_entry = (
-                radar_dt +
-                datetime.timedelta(minutes=15)
-            ).time()
+        # ================= ENTRY AFTER RADAR CANDLE =================
 
-            if now.time() < next_entry:
-                continue
+        radar_dt = datetime.datetime.combine(
+            now.date(),
+            radar_time
+        )
 
-            token = TOKENS[sym]
+        next_allowed_entry = (
+            radar_dt +
+            datetime.timedelta(minutes=15)
+        ).time()
 
-            df = get_candle_data(
-                token,
-                "FIVE_MINUTE"
-            )
+        if now.time() < next_allowed_entry:
+            continue
 
-            if df is None:
-                continue
+        token = TOKENS[sym]
 
-            if len(df) < 10:
-                continue
+        df = get_candle_data(
+            token,
+            "FIVE_MINUTE"
+        )
 
-            df = vwap(df)
+        if df is None:
+            continue
 
-            last = df.iloc[-1]
-            prev = df.iloc[-2]
+        if len(df) < 10:
+            continue
 
-            if (
-                last["close"] > last["vwap"]
-                and
-                prev["low"] <= prev["vwap"] * 1.002
-            ):
+        df = vwap(df)
 
-                sl = min(
-                    prev["low"],
-                    r["low"]
-                )
+        last = df.iloc[-1]
+        prev = df.iloc[-2]
 
-                entry_price = last["close"]
+        # ================= ENTRY CONDITION =================
 
-                target = (
-                    entry_price +
+        if (
+            last["close"] > last["vwap"]
+            and
+            prev["low"] <= prev["vwap"] * 1.002
+        ):
+
+            trades[sym] = {
+
+                "date":
+                    now.strftime("%Y-%m-%d"),
+
+                "radar":
+                    r["time"],
+
+                "entry":
+                    now.strftime("%H:%M"),
+
+                "entry_price":
+                    last["close"],
+
+                "sl":
+                    min(
+                        prev["low"],
+                        r["low"]
+                    ),
+
+                "tgt":
+                    last["close"] +
                     (
-                        entry_price - sl
-                    )
-                )
+                        last["close"] -
+                        min(
+                            prev["low"],
+                            r["low"]
+                        )
+                    ),
 
-                trades[sym] = {
+                "status":
+                    "OPEN"
 
-                    "date":
-                        now.strftime("%Y-%m-%d"),
+            }
 
-                    "radar":
-                        r["time"],
-
-                    "entry":
-                        now.strftime("%H:%M"),
-
-                    "entry_price":
-                        entry_price,
-
-                    "sl":
-                        sl,
-
-                    "tgt":
-                        target,
-
-                    "status":
-                        "OPEN"
-
-                }
-
+            asyncio.run(
                 send(
-
                     f"🚀 ENTRY ALERT\n\n"
                     f"STOCK: {sym}\n"
                     f"RADAR: {r['time']}\n"
                     f"ENTRY: {now.strftime('%H:%M')}\n"
-                    f"PRICE: {round(entry_price,2)}"
-
+                    f"PRICE: {round(last['close'],2)}"
                 )
+            )
 
-        except Exception as e:
-
-            print(f"❌ ENTRY ERROR {sym}:", e)
-
-# =========================================================
-# RESULT
-# =========================================================
+# ================= RESULT =================
 
 def result():
 
     for sym, t in trades.items():
 
-        try:
+        if t["status"] != "OPEN":
+            continue
 
-            if t["status"] != "OPEN":
-                continue
+        token = TOKENS[sym]
 
-            token = TOKENS[sym]
+        df = get_candle_data(
+            token,
+            "FIVE_MINUTE"
+        )
 
-            df = get_candle_data(
-                token,
-                "FIVE_MINUTE"
-            )
+        if df is None:
+            continue
 
-            if df is None:
-                continue
+        last = df.iloc[-1]
 
-            last = df.iloc[-1]
+        if last["low"] <= t["sl"]:
 
-            if last["low"] <= t["sl"]:
+            t["status"] = "LOSS"
 
-                t["status"] = "LOSS"
-
+            asyncio.run(
                 send(
                     f"❌ SL HIT\n\n"
                     f"STOCK: {sym}"
                 )
+            )
 
-            elif last["high"] >= t["tgt"]:
+        elif last["high"] >= t["tgt"]:
 
-                t["status"] = "WIN"
+            t["status"] = "WIN"
 
+            asyncio.run(
                 send(
                     f"🎯 TARGET HIT\n\n"
                     f"STOCK: {sym}"
                 )
+            )
 
-        except Exception as e:
-
-            print(f"❌ RESULT ERROR {sym}:", e)
-
-# =========================================================
-# REPORT
-# =========================================================
+# ================= REPORT =================
 
 def report():
 
     out = []
+
+    # ================= TRADES =================
 
     if trades:
 
@@ -742,10 +722,13 @@ def report():
 f"""📊 {sym}
 
 📡 RADAR: {t['radar']}
+
 🚀 ENTRY: {t['entry']}
 
 💰 ENTRY: {round(t['entry_price'],2)}
+
 🛑 SL: {round(t['sl'],2)}
+
 🎯 TARGET: {round(t['tgt'],2)}
 
 📌 STATUS: {t['status']}
@@ -754,14 +737,52 @@ f"""📊 {sym}
 
             )
 
+    # ================= RADAR WAITING =================
+
+    waiting_map = {}
+
+    for k, r in radar_history.items():
+
+        if r["symbol"] not in trades:
+
+            t = r["time"]
+
+            if t not in waiting_map:
+                waiting_map[t] = []
+
+            waiting_map[t].append(
+                r["symbol"]
+            )
+
+    if waiting_map:
+
+        out.append("\n📡 RADAR WAITING\n")
+
+        sorted_times = sorted(
+            waiting_map.keys(),
+            key=lambda x: datetime.datetime.strptime(
+                x,
+                "%H:%M"
+            )
+        )
+
+        for t in sorted_times:
+
+            out.append(f"\n⏰ {t}")
+
+            for sym in sorted(waiting_map[t]):
+
+                out.append(f"• {sym}")
+
+    # ================= EMPTY =================
+
     if not out:
+
         return "❌ NO SIGNALS TODAY"
 
     return "\n".join(out)
 
-# =========================================================
-# LOOP
-# =========================================================
+# ================= LOOP =================
 
 def loop():
 
@@ -774,6 +795,8 @@ def loop():
         try:
 
             now = datetime.datetime.now(ist)
+
+            # ================= RESULT CHECK TILL 15:30 =================
 
             if (
                 datetime.time(9,15)
@@ -791,8 +814,6 @@ def loop():
 
                         last = key
 
-                        print(f"⏰ LOOP: {key}")
-
                         entry()
 
                         result()
@@ -801,13 +822,9 @@ def loop():
 
         except Exception as e:
 
-            print("❌ LOOP ERROR:", e)
+            print("❌ LOOP:", e)
 
-            time.sleep(5)
-
-# =========================================================
-# WEBSOCKET
-# =========================================================
+# ================= WEBSOCKET =================
 
 def subscribe_dynamic(sws, tokens):
 
@@ -815,20 +832,14 @@ def subscribe_dynamic(sws, tokens):
 
     for i in range(0, len(tokens), batch_size):
 
-        batch = tokens[i:i+batch_size]
+        sws.subscribe([
+            {
+                "exchangeType": 1,
+                "tokens": tokens[i:i+batch_size]
+            }
+        ])
 
-        sws.subscribe(
-            "abc",
-            1,
-            [
-                {
-                    "exchangeType": 1,
-                    "tokens": batch
-                }
-            ]
-        )
-
-        time.sleep(1)
+        time.sleep(0.5)
 
 def socket():
 
@@ -882,45 +893,30 @@ def socket():
 
                         live_price[sym] = price
 
-                except Exception as e:
-
-                    print("❌ SOCKET DATA:", e)
-
-            def on_error(ws, error):
-
-                print("❌ SOCKET ERROR:", error)
-
-            def on_close(ws):
-
-                print("🔴 SOCKET CLOSED")
+                except:
+                    pass
 
             sws.on_open = on_open
             sws.on_data = on_data
-            sws.on_error = on_error
-            sws.on_close = on_close
 
             sws.connect()
 
         except Exception as e:
 
-            print("❌ SOCKET CRASH:", e)
+            print("❌ SOCKET:", e)
 
-        time.sleep(10)
+            time.sleep(5)
 
-# =========================================================
-# HOME
-# =========================================================
+# ================= HOME =================
 
 @app.route("/", methods=["GET"])
 def home():
 
     return "BOT RUNNING", 200
 
-# =========================================================
-# WEBHOOK
-# =========================================================
+# ================= WEBHOOK =================
 
-@app.route("/webhook", methods=["POST"])
+@app.route("/", methods=["POST"])
 def webhook():
 
     global scan_running
@@ -928,8 +924,6 @@ def webhook():
     try:
 
         data = request.get_json()
-
-        print("📩 REQUEST:", data)
 
         if not data:
             return "ok", 200
@@ -944,15 +938,25 @@ def webhook():
 
         print("📩 COMMAND:", text)
 
+        # ================= LIVE =================
+
         if text == "LIVE":
 
-            send(report())
+            msg = report()
+
+            asyncio.run(send(msg))
+
+        # ================= RADAR =================
 
         elif text == "RADAR":
 
             if scan_running:
 
-                send("⚠ SCAN ALREADY RUNNING")
+                asyncio.run(
+                    send(
+                        "⚠ SCAN ALREADY RUNNING"
+                    )
+                )
 
             else:
 
@@ -961,47 +965,61 @@ def webhook():
                     daemon=True
                 ).start()
 
-                send("📡 RADAR SCAN STARTED")
+                asyncio.run(
+                    send(
+                        "📡 RADAR SCAN STARTED"
+                    )
+                )
+
+        # ================= STOP =================
 
         elif text == "STOP":
 
             scan_running = False
 
-            send("🛑 STOP COMMAND RECEIVED")
+            asyncio.run(
+                send(
+                    "🛑 STOP COMMAND RECEIVED"
+                )
+            )
+
+        # ================= STATUS =================
 
         elif text == "STATUS":
 
             if scan_running:
 
-                send("📡 SCAN RUNNING")
+                msg = "📡 SCAN RUNNING"
 
             else:
 
-                send("✅ IDLE")
+                msg = "✅ IDLE"
+
+            asyncio.run(send(msg))
+
+        # ================= UNKNOWN =================
 
         else:
 
-            send(
-
-                "AVAILABLE COMMANDS:\n\n"
-                "RADAR\n"
-                "LIVE\n"
-                "STOP\n"
-                "STATUS"
-
+            asyncio.run(
+                send(
+                    "AVAILABLE COMMANDS:\n\n"
+                    "RADAR\n"
+                    "LIVE\n"
+                    "STOP\n"
+                    "STATUS"
+                )
             )
 
         return "ok", 200
 
     except Exception as e:
 
-        print("❌ WEBHOOK ERROR:", e)
+        print("❌ WEBHOOK:", e)
 
         return "error", 200
 
-# =========================================================
-# MAIN
-# =========================================================
+# ================= MAIN =================
 
 if __name__ == "__main__":
 
@@ -1010,6 +1028,8 @@ if __name__ == "__main__":
     try:
 
         angel, FEED_TOKEN, JWT = login()
+
+        print("✅ LOGIN SUCCESS")
 
         TOKENS, TOKEN_MAP = get_fno_tokens()
 
@@ -1028,7 +1048,7 @@ if __name__ == "__main__":
             daemon=True
         ).start()
 
-        print("✅ SYSTEM RUNNING")
+        print("🔌 SYSTEM RUNNING")
 
         port = int(
             os.environ.get("PORT", 10000)
@@ -1036,11 +1056,9 @@ if __name__ == "__main__":
 
         app.run(
             host="0.0.0.0",
-            port=port,
-            debug=False,
-            threaded=True
+            port=port
         )
 
     except Exception as e:
 
-        print("❌ MAIN CRASH:", e)
+        print("❌ CRASH:", e)            , bot not responding
