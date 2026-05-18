@@ -6,3 +6,4 @@ requests
 pyotp
 pytz
 websocket-client
+logzero
