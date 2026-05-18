@@ -1061,4 +1061,4 @@ if __name__ == "__main__":
 
     except Exception as e:
 
-        print("❌ CRASH:", e)            , bot not responding
+        print("❌ CRASH:", e)
