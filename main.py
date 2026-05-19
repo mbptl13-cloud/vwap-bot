@@ -796,7 +796,8 @@ def loop():
 
     ist = pytz.timezone("Asia/Kolkata")
 
-    last = None
+    last_radar = None
+    last_live = None
 
     while True:
 
@@ -804,33 +805,78 @@ def loop():
 
             now = datetime.datetime.now(ist)
 
-            # ================= RESULT CHECK TILL 15:30 =================
+            current_key = now.strftime("%H:%M")
+
+            # =========================================
+            # AUTO RADAR SCAN
+            # EVERY 5 MIN
+            # 09:30 TO 13:45
+            # =========================================
 
             if (
-                datetime.time(9,15)
+                datetime.time(9,30)
                 <=
                 now.time()
                 <=
-                datetime.time(15,30)
+                datetime.time(13,45)
             ):
 
                 if now.minute % 5 == 0:
 
-                    key = now.strftime("%H:%M")
+                    radar_key = "RADAR_" + current_key
 
-                    if key != last:
+                    if radar_key != last_radar:
 
-                        last = key
+                        last_radar = radar_key
+
+                        if not scan_running:
+
+                            print(
+                                f"📡 AUTO RADAR {current_key}"
+                            )
+
+                            threading.Thread(
+                                target=radar,
+                                daemon=True
+                            ).start()
+
+            # =========================================
+            # LIVE ENTRY + RESULT SCAN
+            # EVERY 5 MIN
+            # 09:45 TO 14:00
+            # =========================================
+
+            if (
+                datetime.time(9,45)
+                <=
+                now.time()
+                <=
+                datetime.time(14,0)
+            ):
+
+                if now.minute % 5 == 0:
+
+                    live_key = "LIVE_" + current_key
+
+                    if live_key != last_live:
+
+                        last_live = live_key
+
+                        print(
+                            f"🚀 LIVE SCAN {current_key}"
+                        )
 
                         entry()
 
                         result()
 
-            time.sleep(5)
+            time.sleep(2)
 
         except Exception as e:
 
             print("❌ LOOP:", e)
+
+            time.sleep(5)
 
 # ================= WEBSOCKET =================
 
