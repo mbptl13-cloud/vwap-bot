@@ -644,13 +644,21 @@ def entry():
 
             asyncio.run(
                 send(
-                    f"🚀 ENTRY ALERT\n\n"
-                    f"STOCK: {sym}\n"
-                    f"RADAR: {r['time']}\n"
-                    f"ENTRY: {now.strftime('%H:%M')}\n"
-                    f"PRICE: {round(last['close'],2)}"
+                    f"🚀 ENTRY ALERT 🚀\n\n"
+
+                    f"📈 STOCK: {sym}\n"
+
+                    f"📡 RADAR: {r['time']}\n"
+
+                    f"⏰ ENTRY: {now.strftime('%H:%M')}\n"
+
+                    f"💰 PRICE: {round(last['close'], 2)}\n"
+
+                    f"🛑 STOPLOSS: {round(sl_price, 2)}\n"
+
+                    f"🎯 TARGET: {round(target_price, 2)}"
                 )
-            )
+             )
 
 # ================= RESULT =================
 
