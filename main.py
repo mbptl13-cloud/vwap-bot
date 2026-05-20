@@ -583,7 +583,7 @@ def radar():
 
         print("❌ RADAR ERROR:", e)
 
-# ================= BACKTEST =================
+# ================= REPLACE FULL backtest_scan FUNCTION WITH THIS =================
 
 def backtest_scan(backtest_date):
 
@@ -594,14 +594,16 @@ def backtest_scan(backtest_date):
         radar_results = {}
         trade_results = []
 
+        # ================= LOOP ALL STOCKS =================
+
         for sym, token in TOKENS.items():
 
             try:
 
-                # ================= 15 MIN DATA =================
-
                 from_date = f"{backtest_date} 09:15"
                 to_date = f"{backtest_date} 15:30"
+
+                # ================= 15 MIN DATA =================
 
                 df15 = get_candle_data(
                     token,
@@ -624,11 +626,15 @@ def backtest_scan(backtest_date):
                     .mean()
                 )
 
+                # ================= FIND RADAR =================
+
                 for i in range(len(df15)):
 
                     row = df15.iloc[i]
 
                     candle_time = row["time"]
+
+                    # ================= TIME FILTER =================
 
                     if candle_time.hour < 9:
                         continue
@@ -649,6 +655,8 @@ def backtest_scan(backtest_date):
                         candle_time.minute > 45
                     ):
                         continue
+
+                    # ================= RADAR CONDITIONS =================
 
                     volume_cond = (
                         row["volume"] > 500000
@@ -735,14 +743,24 @@ def backtest_scan(backtest_date):
                     if radar_key in radar_results:
                         continue
 
+                    # ================= SAVE RADAR =================
+
                     radar_results[radar_key] = {
 
                         "symbol": sym,
-                        "time": radar_time
+                        "time": radar_time,
+                        "high": row["high"],
+                        "low": row["low"],
+                        "close": row["close"]
 
                     }
 
-                    # ================= 5 MIN ENTRY =================
+                    print(
+                        f"📡 BACKTEST RADAR: "
+                        f"{sym} {radar_time}"
+                    )
+
+                    # ================= 5 MIN DATA =================
 
                     df5 = get_candle_data(
                         token,
@@ -761,19 +779,16 @@ def backtest_scan(backtest_date):
 
                     radar_dt = candle_time
 
-                    entry_found = False
+                    # ================= ENTRY SEARCH =================
 
-                    for j in range(len(df5)):
+                    for j in range(1, len(df5)):
 
                         last = df5.iloc[j]
-
-                        if j < 1:
-                            continue
-
                         prev = df5.iloc[j - 1]
 
                         candle_5_time = last["time"]
 
+                        # ENTRY ONLY AFTER RADAR
                         if candle_5_time <= radar_dt:
                             continue
 
@@ -784,6 +799,8 @@ def backtest_scan(backtest_date):
                             ) /
                             last["vwap"]
                         ) * 100
+
+                        # ================= ENTRY CONDITION =================
 
                         if (
 
@@ -817,9 +834,9 @@ def backtest_scan(backtest_date):
 
                             result_status = "OPEN"
 
-                            result_time = ""
+                            exit_time = ""
 
-                            # ================= CHECK RESULT =================
+                            # ================= RESULT CHECK =================
 
                             future_df = df5[
                                 df5["time"] >
@@ -832,7 +849,7 @@ def backtest_scan(backtest_date):
 
                                     result_status = "LOSS"
 
-                                    result_time = (
+                                    exit_time = (
                                         frow["time"]
                                         .strftime("%H:%M")
                                     )
@@ -843,7 +860,7 @@ def backtest_scan(backtest_date):
 
                                     result_status = "WIN"
 
-                                    result_time = (
+                                    exit_time = (
                                         frow["time"]
                                         .strftime("%H:%M")
                                     )
@@ -852,36 +869,117 @@ def backtest_scan(backtest_date):
 
                             trade_results.append({
 
-                                "symbol": sym,
-                                "radar": radar_time,
-                                "entry": candle_5_time.strftime("%H:%M"),
-                                "entry_price": round(entry_price, 2),
-                                "sl": round(sl_price, 2),
-                                "target": round(target_price, 2),
-                                "result": result_status,
-                                "exit_time": result_time
+                                "symbol":
+                                    sym,
+
+                                "radar":
+                                    radar_time,
+
+                                "entry":
+                                    candle_5_time.strftime("%H:%M"),
+
+                                "entry_price":
+                                    round(entry_price, 2),
+
+                                "sl":
+                                    round(sl_price, 2),
+
+                                "target":
+                                    round(target_price, 2),
+
+                                "result":
+                                    result_status,
+
+                                "exit":
+                                    exit_time
 
                             })
 
-                            entry_found = True
-                            break
+                            print(
+                                f"🚀 BACKTEST ENTRY: "
+                                f"{sym} "
+                                f"{candle_5_time.strftime('%H:%M')}"
+                            )
 
-                    if entry_found:
-                        break
+                            # ONE TRADE PER STOCK
+                            break
 
             except Exception as e:
 
                 print(f"❌ BACKTEST {sym}:", e)
 
-        # ================= REPORT =================
+        # =========================================================
+        # ================= RADAR MESSAGE =========================
+        # =========================================================
 
-        msg = f"📊 BACKTEST REPORT {backtest_date}\n\n"
+        radar_msg = (
+            f"📡 BACKTEST RADAR {backtest_date}\n\n"
+        )
+
+        time_map = {}
+
+        for k, r in radar_results.items():
+
+            t = r["time"]
+
+            if t not in time_map:
+                time_map[t] = []
+
+            time_map[t].append(
+                r["symbol"]
+            )
+
+        start_time = datetime.datetime.strptime(
+            "09:30",
+            "%H:%M"
+        )
+
+        end_time = datetime.datetime.strptime(
+            "13:45",
+            "%H:%M"
+        )
+
+        current = start_time
+
+        while current <= end_time:
+
+            t = current.strftime("%H:%M")
+
+            radar_msg += f"⏰ {t}\n"
+
+            if t in time_map:
+
+                for s in sorted(time_map[t]):
+
+                    radar_msg += f"• {s}\n"
+
+            else:
+
+                radar_msg += "❌ NO STOCK\n"
+
+            radar_msg += "\n"
+
+            current += datetime.timedelta(
+                minutes=15
+            )
+
+        asyncio.run(send(radar_msg))
+
+        # =========================================================
+        # ================= TRADE MESSAGE =========================
+        # =========================================================
+
+        trade_msg = (
+            f"🚀 BACKTEST TRADES {backtest_date}\n\n"
+        )
 
         if not trade_results:
 
-            msg += "❌ NO TRADE FOUND"
+            trade_msg += (
+                "❌ NO TRADE FOUND"
+            )
 
-            asyncio.run(send(msg))
+            asyncio.run(send(trade_msg))
             return
 
         win = 0
@@ -895,22 +993,32 @@ def backtest_scan(backtest_date):
             elif t["result"] == "LOSS":
                 loss += 1
 
-            msg += (
+            trade_msg += (
+
                 f"📈 {t['symbol']}\n"
+
                 f"📡 RADAR: {t['radar']}\n"
+
                 f"⏰ ENTRY: {t['entry']}\n"
-                f"💰 PRICE: {t['entry_price']}\n"
+
+                f"💰 ENTRY PRICE: "
+                f"{t['entry_price']}\n"
+
                 f"🛑 SL: {t['sl']}\n"
-                f"🎯 TGT: {t['target']}\n"
+
+                f"🎯 TARGET: {t['target']}\n"
+
                 f"🏁 RESULT: {t['result']}\n"
+
             )
 
-            if t["exit_time"]:
-                msg += (
-                    f"⌛ EXIT: {t['exit_time']}\n"
+            if t["exit"]:
+
+                trade_msg += (
+                    f"⌛ EXIT: {t['exit']}\n"
                 )
 
-            msg += "\n"
+            trade_msg += "\n"
 
         total = len(trade_results)
 
@@ -919,19 +1027,25 @@ def backtest_scan(backtest_date):
             2
         )
 
-        msg += (
-            f"✅ TOTAL: {total}\n"
+        trade_msg += (
+
+            f"━━━━━━━━━━━━━━\n"
+
+            f"✅ TOTAL TRADE: {total}\n"
+
             f"🎯 WIN: {win}\n"
+
             f"❌ LOSS: {loss}\n"
+
             f"📊 ACCURACY: {accuracy}%"
+
         )
 
-        asyncio.run(send(msg))
+        asyncio.run(send(trade_msg))
 
     except Exception as e:
 
         print("❌ BACKTEST ERROR:", e)
-
 # ================= ENTRY =================
 
 def entry():
