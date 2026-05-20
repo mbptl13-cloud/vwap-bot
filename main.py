@@ -392,7 +392,7 @@ def radar(chat_id):
                     if (
                         candle_time.hour == 13
                         and
-                        candle_time.minute > 45
+                        candle_time.minute > 30
                     ):
                         continue
 
