@@ -319,8 +319,6 @@ def radar():
         radar_history = {}
         active_radar = {}
 
-        count = 0
-
         print("📡 RUNNING RADAR...")
 
         for sym, token in TOKENS.items():
@@ -384,17 +382,17 @@ def radar():
                     ):
                         continue
 
-                    # ================= CONDITIONS =================
+                    # ================= TIGHT CONDITIONS =================
 
                     volume_cond = (
-                        row["volume"] > 200000
+                        row["volume"] > 500000
                     )
 
                     turnover_cond = (
                         (
                             row["close"] *
                             row["volume"]
-                        ) > 10000000
+                        ) > 15000000
                     )
 
                     range_percent = (
@@ -408,7 +406,7 @@ def radar():
                     )
 
                     range_cond = (
-                        range_percent > 0.7
+                        range_percent > 1
                     )
 
                     body_percent = (
@@ -422,12 +420,19 @@ def radar():
                     )
 
                     body_cond = (
-                        body_percent > 0.35
+                        body_percent > 0.6
                     )
 
                     vwap_cond = (
                         row["close"] >
                         row["vwap"]
+                    )
+
+                    volume_blast_cond = (
+                        row["volume"] >
+                        (
+                            row["vol_sma20"] * 2
+                        )
                     )
 
                     bullish_cond = (
@@ -446,6 +451,8 @@ def radar():
                         body_cond
                         and
                         vwap_cond
+                        and
+                        volume_blast_cond
                         and
                         bullish_cond
 
@@ -480,8 +487,6 @@ def radar():
                         }
 
                         active_radar[sym] = radar_history[key]
-
-                        count += 1
 
                         print(
                             f"📡 RADAR: "
@@ -617,23 +622,46 @@ def entry():
             last = df.iloc[-1]
             prev = df.iloc[-2]
 
+            # ================= ENTRY NEAR VWAP =================
+
+            distance_from_vwap = (
+                (
+                    last["close"] -
+                    last["vwap"]
+                ) /
+                last["vwap"]
+            ) * 100
+
             if (
+
                 last["close"] > last["vwap"]
+
                 and
-                prev["low"] <= prev["vwap"] * 1.002
+
+                prev["low"] <= prev["vwap"] * 1.001
+
+                and
+
+                distance_from_vwap <= 0.3
+
             ):
 
-                sl_price = min(
-                    prev["low"],
-                    r["low"]
+                # ================= VWAP BASED SL =================
+
+                sl_price = (
+                    last["vwap"] * 0.997
                 )
+
+                risk = (
+                    last["close"] -
+                    sl_price
+                )
+
+                # ================= 1:2 TARGET =================
 
                 target_price = (
                     last["close"] +
-                    (
-                        last["close"] -
-                        sl_price
-                    )
+                    (risk * 2)
                 )
 
                 trades[sym] = {
@@ -672,6 +700,8 @@ def entry():
                         f"⏰ ENTRY: {now.strftime('%H:%M')}\n"
 
                         f"💰 PRICE: {round(last['close'], 2)}\n"
+
+                        f"📊 VWAP: {round(last['vwap'], 2)}\n"
 
                         f"🛑 STOPLOSS: {round(sl_price, 2)}\n"
 
@@ -734,7 +764,7 @@ def result():
 
             print(f"❌ RESULT {sym}:", e)
 
-# ================= LOOP =================
+# ================= AUTO ENTRY LOOP =================
 
 def loop():
 
@@ -943,7 +973,7 @@ def webhook():
 
                     msg += (
                         f"📈 {sym}\n"
-                        f"ENTRY: {t['entry_price']}\n"
+                        f"ENTRY: {round(t['entry_price'],2)}\n"
                         f"SL: {round(t['sl'],2)}\n"
                         f"TGT: {round(t['tgt'],2)}\n"
                         f"STATUS: {t['status']}\n\n"
