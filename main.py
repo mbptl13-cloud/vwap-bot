@@ -1,3 +1,5 @@
+# ================= IMPORTS =================
+
 import time
 import datetime
 import pytz
@@ -346,8 +348,6 @@ def radar():
 
                 df = vwap(df)
 
-                df = df.tail(30)
-
                 df["vol_sma20"] = (
                     df["volume"]
                     .rolling(20)
@@ -359,6 +359,15 @@ def radar():
                     row = df.iloc[i]
 
                     candle_time = row["time"]
+
+                    # ================= TODAY FILTER =================
+
+                    today = datetime.datetime.now(
+                        pytz.timezone("Asia/Kolkata")
+                    ).date()
+
+                    if candle_time.date() != today:
+                        continue
 
                     # ================= TIME FILTER =================
 
@@ -382,7 +391,7 @@ def radar():
                     ):
                         continue
 
-                    # ================= TIGHT CONDITIONS =================
+                    # ================= ORIGINAL TIGHT CONDITIONS =================
 
                     volume_cond = (
                         row["volume"] > 500000
@@ -646,7 +655,7 @@ def entry():
 
             ):
 
-                # ================= VWAP BASED SL =================
+                # ================= VWAP SL =================
 
                 sl_price = (
                     last["vwap"] * 0.997
@@ -764,7 +773,7 @@ def result():
 
             print(f"❌ RESULT {sym}:", e)
 
-# ================= AUTO ENTRY LOOP =================
+# ================= LOOP =================
 
 def loop():
 
@@ -928,8 +937,6 @@ def webhook():
 
         print("📩 COMMAND:", text)
 
-        # ================= RADAR =================
-
         if text == "RADAR":
 
             if scan_running:
@@ -952,8 +959,6 @@ def webhook():
                         "📡 RADAR SCAN STARTED"
                     )
                 )
-
-        # ================= LIVE =================
 
         elif text == "LIVE":
 
@@ -981,8 +986,6 @@ def webhook():
 
                 asyncio.run(send(msg))
 
-        # ================= STOP =================
-
         elif text == "STOP":
 
             scan_running = False
@@ -992,8 +995,6 @@ def webhook():
                     "🛑 STOP COMMAND RECEIVED"
                 )
             )
-
-        # ================= STATUS =================
 
         elif text == "STATUS":
 
@@ -1021,8 +1022,6 @@ def webhook():
                 msg = "✅ IDLE"
 
             asyncio.run(send(msg))
-
-        # ================= UNKNOWN =================
 
         else:
 
