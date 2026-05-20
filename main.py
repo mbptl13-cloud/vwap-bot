@@ -23,8 +23,7 @@ CLIENT_ID = "M50717452"
 PASSWORD = "2329"
 TOTP_SECRET = "3QCEGXTQKFN6BNHP76N7P3QZAY"
 
-TOKEN = "8944295593:AAHXYIQcXVr5BSt1ilwjUoKp59v9knVNG70"
-CHAT_ID = 309248606
+TOKEN = "YOUR_BOT_TOKEN"
 
 bot = Bot(token=TOKEN)
 
@@ -48,6 +47,8 @@ trades = {}
 
 live_price = {}
 radar_history = {}
+
+CURRENT_CHAT_ID = None
 
 # ================= LOGIN =================
 
@@ -75,22 +76,27 @@ def login():
 
 # ================= TELEGRAM =================
 
-async def send(msg):
+async def send(chat_id, msg):
 
     try:
 
         await bot.send_message(
-            chat_id=CHAT_ID,
+            chat_id=chat_id,
             text=msg
         )
 
     except Exception as e:
 
-        print("❌ TELEGRAM:", e)
+        print(
+            f"❌ TELEGRAM {chat_id}:",
+            e
+        )
 
 # ================= VWAP =================
 
 def vwap(df):
+
+    df = df.copy()
 
     df["tp"] = (
         df["high"] +
@@ -303,7 +309,7 @@ def get_candle_data(token, interval):
 
 # ================= RADAR =================
 
-def radar():
+def radar(chat_id):
 
     global scan_running
     global scan_started_at
@@ -328,7 +334,10 @@ def radar():
             if not scan_running:
 
                 asyncio.run(
-                    send("🛑 SCAN STOPPED")
+                    send(
+                        chat_id,
+                        "🛑 SCAN STOPPED"
+                    )
                 )
 
                 return
@@ -360,16 +369,12 @@ def radar():
 
                     candle_time = row["time"]
 
-                    # ================= TODAY FILTER =================
-
                     today = datetime.datetime.now(
                         pytz.timezone("Asia/Kolkata")
                     ).date()
 
                     if candle_time.date() != today:
                         continue
-
-                    # ================= TIME FILTER =================
 
                     if candle_time.hour < 9:
                         continue
@@ -390,8 +395,6 @@ def radar():
                         candle_time.minute > 45
                     ):
                         continue
-
-                    # ================= ORIGINAL TIGHT CONDITIONS =================
 
                     volume_cond = (
                         row["volume"] > 500000
@@ -482,16 +485,7 @@ def radar():
                                 sym,
 
                             "time":
-                                candle_time.strftime("%H:%M"),
-
-                            "high":
-                                row["high"],
-
-                            "low":
-                                row["low"],
-
-                            "close":
-                                row["close"]
+                                candle_time.strftime("%H:%M")
 
                         }
 
@@ -506,8 +500,6 @@ def radar():
             except Exception as e:
 
                 print(f"❌ {sym}:", e)
-
-        # ================= MESSAGE =================
 
         time_map = {}
 
@@ -532,9 +524,11 @@ def radar():
         now_ist = datetime.datetime.now(
             pytz.timezone("Asia/Kolkata")
         )
+
         completed_time = now_ist - datetime.timedelta(
-                minutes=15
+            minutes=15
         )
+
         completed_time = completed_time.replace(
             minute=(completed_time.minute // 15) * 15,
             second=0,
@@ -565,9 +559,9 @@ def radar():
                 minutes=15
             )
 
-        asyncio.run(send(msg))
-
-        time.sleep(2)
+        asyncio.run(
+            send(chat_id, msg)
+        )
 
         scan_running = False
 
@@ -579,7 +573,7 @@ def radar():
 
 # ================= ENTRY =================
 
-def entry():
+def entry(chat_id):
 
     now = datetime.datetime.now(
         pytz.timezone("Asia/Kolkata")
@@ -603,24 +597,6 @@ def entry():
 
             r = active_radar[sym]
 
-            radar_time = datetime.datetime.strptime(
-                r["time"],
-                "%H:%M"
-            ).time()
-
-            radar_dt = datetime.datetime.combine(
-                now.date(),
-                radar_time
-            )
-
-            next_allowed_entry = (
-                radar_dt +
-                datetime.timedelta(minutes=15)
-            ).time()
-
-            if now.time() < next_allowed_entry:
-                continue
-
             token = TOKENS[sym]
 
             df = get_candle_data(
@@ -638,8 +614,6 @@ def entry():
 
             last = df.iloc[-1]
             prev = df.iloc[-2]
-
-            # ================= ENTRY NEAR VWAP =================
 
             distance_from_vwap = (
                 (
@@ -663,8 +637,6 @@ def entry():
 
             ):
 
-                # ================= VWAP SL =================
-
                 sl_price = (
                     last["vwap"] * 0.997
                 )
@@ -674,23 +646,12 @@ def entry():
                     sl_price
                 )
 
-                # ================= 1:2 TARGET =================
-
                 target_price = (
                     last["close"] +
                     (risk * 2)
                 )
 
                 trades[sym] = {
-
-                    "date":
-                        now.strftime("%Y-%m-%d"),
-
-                    "radar":
-                        r["time"],
-
-                    "entry":
-                        now.strftime("%H:%M"),
 
                     "entry_price":
                         last["close"],
@@ -708,20 +669,11 @@ def entry():
 
                 asyncio.run(
                     send(
+                        chat_id,
                         f"🚀 ENTRY ALERT 🚀\n\n"
-
                         f"📈 STOCK: {sym}\n"
-
-                        f"📡 RADAR: {r['time']}\n"
-
-                        f"⏰ ENTRY: {now.strftime('%H:%M')}\n"
-
                         f"💰 PRICE: {round(last['close'], 2)}\n"
-
-                        f"📊 VWAP: {round(last['vwap'], 2)}\n"
-
-                        f"🛑 STOPLOSS: {round(sl_price, 2)}\n"
-
+                        f"🛑 SL: {round(sl_price, 2)}\n"
                         f"🎯 TARGET: {round(target_price, 2)}"
                     )
                 )
@@ -732,7 +684,7 @@ def entry():
 
 # ================= RESULT =================
 
-def result():
+def result(chat_id):
 
     for sym, t in trades.items():
 
@@ -759,9 +711,9 @@ def result():
 
                 asyncio.run(
                     send(
+                        chat_id,
                         f"❌ SL HIT\n\n"
-                        f"📈 STOCK: {sym}\n"
-                        f"🛑 SL: {round(t['sl'],2)}"
+                        f"📈 STOCK: {sym}"
                     )
                 )
 
@@ -771,9 +723,9 @@ def result():
 
                 asyncio.run(
                     send(
+                        chat_id,
                         f"🎯 TARGET HIT\n\n"
-                        f"📈 STOCK: {sym}\n"
-                        f"🎯 TARGET: {round(t['tgt'],2)}"
+                        f"📈 STOCK: {sym}"
                     )
                 )
 
@@ -785,6 +737,8 @@ def result():
 
 def loop():
 
+    global CURRENT_CHAT_ID
+
     ist = pytz.timezone("Asia/Kolkata")
 
     last = None
@@ -795,35 +749,31 @@ def loop():
 
             now = datetime.datetime.now(ist)
 
-            if (
-                datetime.time(9,45)
-                <=
-                now.time()
-                <=
-                datetime.time(15,0)
-            ):
+            if CURRENT_CHAT_ID:
 
-                if now.minute % 5 == 0:
+                if (
+                    datetime.time(9,45)
+                    <=
+                    now.time()
+                    <=
+                    datetime.time(15,0)
+                ):
 
-                    key = now.strftime("%H:%M")
+                    if now.minute % 5 == 0:
 
-                    if key != last:
+                        key = now.strftime("%H:%M")
 
-                        last = key
+                        if key != last:
 
-                        print(
-                            f"🚀 LIVE CHECK {key}"
-                        )
+                            last = key
 
-                        entry()
-
-                        asyncio.run(
-                            send(
-                                f"✅ ENTRY CHECKED {key}"
+                            print(
+                                f"🚀 LIVE CHECK {key}"
                             )
-                        )
 
-                        result()
+                            entry(CURRENT_CHAT_ID)
+
+                            result(CURRENT_CHAT_ID)
 
             time.sleep(2)
 
@@ -933,6 +883,7 @@ def home():
 def webhook():
 
     global scan_running
+    global CURRENT_CHAT_ID
 
     try:
 
@@ -940,6 +891,15 @@ def webhook():
 
         if not data:
             return "ok", 200
+
+        chat_id = (
+            data
+            .get("message", {})
+            .get("chat", {})
+            .get("id")
+        )
+
+        CURRENT_CHAT_ID = chat_id
 
         text = (
             data
@@ -957,6 +917,7 @@ def webhook():
 
                 asyncio.run(
                     send(
+                        chat_id,
                         "⚠ SCAN ALREADY RUNNING"
                     )
                 )
@@ -965,11 +926,13 @@ def webhook():
 
                 threading.Thread(
                     target=radar,
+                    args=(chat_id,),
                     daemon=True
                 ).start()
 
                 asyncio.run(
                     send(
+                        chat_id,
                         "📡 RADAR SCAN STARTED"
                     )
                 )
@@ -980,6 +943,7 @@ def webhook():
 
                 asyncio.run(
                     send(
+                        chat_id,
                         "❌ NO ACTIVE TRADES"
                     )
                 )
@@ -998,7 +962,9 @@ def webhook():
                         f"STATUS: {t['status']}\n\n"
                     )
 
-                asyncio.run(send(msg))
+                asyncio.run(
+                    send(chat_id, msg)
+                )
 
         elif text == "STOP":
 
@@ -1006,6 +972,7 @@ def webhook():
 
             asyncio.run(
                 send(
+                    chat_id,
                     "🛑 STOP COMMAND RECEIVED"
                 )
             )
@@ -1035,12 +1002,15 @@ def webhook():
 
                 msg = "✅ IDLE"
 
-            asyncio.run(send(msg))
+            asyncio.run(
+                send(chat_id, msg)
+            )
 
         else:
 
             asyncio.run(
                 send(
+                    chat_id,
                     "AVAILABLE COMMANDS:\n\n"
                     "RADAR\n"
                     "LIVE\n"
