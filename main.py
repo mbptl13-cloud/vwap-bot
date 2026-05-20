@@ -23,6 +23,7 @@ TOTP_SECRET = "3QCEGXTQKFN6BNHP76N7P3QZAY"
 
 TOKEN = "8944295593:AAHXYIQcXVr5BSt1ilwjUoKp59v9knVNG70"
 CHAT_ID = 309248606
+
 bot = Bot(token=TOKEN)
 
 app = Flask(__name__)
@@ -38,6 +39,7 @@ JWT = None
 angel = None
 
 scan_running = False
+scan_started_at = None
 
 active_radar = {}
 trades = {}
@@ -49,11 +51,13 @@ radar_history = {}
 
 def login():
 
-    print("🔐 Logging in...")
+    print("🔐 LOGGING IN...")
 
     obj = SmartConnect(api_key=API_KEY)
 
-    totp = pyotp.TOTP(TOTP_SECRET).now()
+    totp = pyotp.TOTP(
+        TOTP_SECRET
+    ).now()
 
     data = obj.generateSession(
         CLIENT_ID,
@@ -92,7 +96,10 @@ def vwap(df):
         df["close"]
     ) / 3
 
-    df["cv"] = df["volume"].cumsum()
+    df["cv"] = (
+        df["volume"]
+        .cumsum()
+    )
 
     df["cpv"] = (
         df["tp"] *
@@ -106,11 +113,11 @@ def vwap(df):
 
     return df
 
-# ================= FNO TOKEN FETCH =================
+# ================= TOKEN FETCH =================
 
 def get_fno_tokens():
 
-    print("🔄 Fetching ONLY FNO Stocks...")
+    print("🔄 FETCHING FNO STOCKS...")
 
     url = "https://margincalculator.angelbroking.com/OpenAPI_File/files/OpenAPIScripMaster.json"
 
@@ -150,8 +157,6 @@ def get_fno_tokens():
         except:
             pass
 
-    print(f"✅ FNO SYMBOLS: {len(fno_symbols)}")
-
     tokens = {}
     token_map = {}
 
@@ -179,7 +184,7 @@ def get_fno_tokens():
         except:
             pass
 
-    print(f"✅ FINAL FNO STOCKS: {len(tokens)}")
+    print(f"✅ TOTAL FNO STOCKS: {len(tokens)}")
 
     return tokens, token_map
 
@@ -260,7 +265,19 @@ def get_candle_data(token, interval):
             ]
         )
 
-        df["time"] = pd.to_datetime(df["time"])
+        df["time"] = pd.to_datetime(
+            df["time"]
+        )
+
+        try:
+
+            df["time"] = (
+                df["time"]
+                .dt.tz_localize(None)
+            )
+
+        except:
+            pass
 
         for col in [
             "open",
@@ -269,7 +286,10 @@ def get_candle_data(token, interval):
             "close",
             "volume"
         ]:
-            df[col] = pd.to_numeric(df[col])
+
+            df[col] = pd.to_numeric(
+                df[col]
+            )
 
         return df
 
@@ -284,12 +304,17 @@ def get_candle_data(token, interval):
 def radar():
 
     global scan_running
+    global scan_started_at
     global radar_history
     global active_radar
 
     try:
 
         scan_running = True
+
+        scan_started_at = datetime.datetime.now(
+            pytz.timezone("Asia/Kolkata")
+        )
 
         radar_history = {}
         active_radar = {}
@@ -298,15 +323,14 @@ def radar():
 
         print("📡 RUNNING RADAR...")
 
-        ist = pytz.timezone("Asia/Kolkata")
-
-        today = datetime.datetime.now(ist).date()
-
         for sym, token in TOKENS.items():
 
             if not scan_running:
 
-                asyncio.run(send("🛑 SCAN STOPPED"))
+                asyncio.run(
+                    send("🛑 SCAN STOPPED")
+                )
+
                 return
 
             try:
@@ -324,47 +348,53 @@ def radar():
 
                 df = vwap(df)
 
+                df = df.tail(30)
+
                 df["vol_sma20"] = (
                     df["volume"]
                     .rolling(20)
                     .mean()
                 )
+
                 for i in range(len(df)):
 
                     row = df.iloc[i]
 
                     candle_time = row["time"]
 
-                    # ================= TODAY FILTER =================
-
-                    if candle_time.date() != today:
-                        continue
-
-                    # ================= RADAR TIME FILTER =================
+                    # ================= TIME FILTER =================
 
                     if candle_time.hour < 9:
                         continue
 
-                    if candle_time.hour == 9 and candle_time.minute < 30:
+                    if (
+                        candle_time.hour == 9
+                        and
+                        candle_time.minute < 30
+                    ):
                         continue
 
                     if candle_time.hour > 13:
                         continue
 
-                    if candle_time.hour == 13 and candle_time.minute > 30:
+                    if (
+                        candle_time.hour == 13
+                        and
+                        candle_time.minute > 45
+                    ):
                         continue
 
                     # ================= CONDITIONS =================
 
                     volume_cond = (
-                        row["volume"] > 500000
+                        row["volume"] > 200000
                     )
 
                     turnover_cond = (
                         (
                             row["close"] *
                             row["volume"]
-                        ) > 15000000
+                        ) > 10000000
                     )
 
                     range_percent = (
@@ -378,7 +408,7 @@ def radar():
                     )
 
                     range_cond = (
-                        range_percent > 1
+                        range_percent > 0.7
                     )
 
                     body_percent = (
@@ -392,7 +422,7 @@ def radar():
                     )
 
                     body_cond = (
-                        body_percent > 0.6
+                        body_percent > 0.35
                     )
 
                     vwap_cond = (
@@ -400,19 +430,10 @@ def radar():
                         row["vwap"]
                     )
 
-                    volume_blast_cond = (
-                        row["volume"] >
-                        (
-                            row["vol_sma20"] * 2
-                        )
-                    )
-
                     bullish_cond = (
                         row["close"] >
                         row["open"]
                     )
-
-                    # ================= FINAL RADAR =================
 
                     if (
 
@@ -425,8 +446,6 @@ def radar():
                         body_cond
                         and
                         vwap_cond
-                        and
-                        volume_blast_cond
                         and
                         bullish_cond
 
@@ -474,61 +493,61 @@ def radar():
 
                 print(f"❌ {sym}:", e)
 
+        # ================= MESSAGE =================
+
+        time_map = {}
+
+        for k, r in radar_history.items():
+
+            t = r["time"]
+
+            if t not in time_map:
+                time_map[t] = []
+
+            time_map[t].append(
+                r["symbol"]
+            )
+
+        msg = "📡 RADAR SIGNALS\n\n"
+
+        start_time = datetime.datetime.strptime(
+            "09:30",
+            "%H:%M"
+        )
+
+        now_ist = datetime.datetime.now(
+            pytz.timezone("Asia/Kolkata")
+        )
+
+        current = start_time
+
+        while current.time() <= now_ist.time():
+
+            t = current.strftime("%H:%M")
+
+            msg += f"⏰ {t}\n"
+
+            if t in time_map:
+
+                for s in sorted(time_map[t]):
+
+                    msg += f"• {s}\n"
+
+            else:
+
+                msg += "❌ NO STOCK\n"
+
+            msg += "\n"
+
+            current += datetime.timedelta(
+                minutes=15
+            )
+
+        asyncio.run(send(msg))
+
+        time.sleep(2)
+
         scan_running = False
-
-        if count == 0:
-
-            asyncio.run(
-                send("❌ NO RADAR FOUND")
-            )
-
-        else:
-
-            time_map = {}
-
-            for k, r in radar_history.items():
-
-                t = r["time"]
-
-                if t not in time_map:
-                    time_map[t] = []
-
-                time_map[t].append(r["symbol"])
-
-            msg = "📡 RADAR SIGNALS\n\n"
-
-            start_time = datetime.datetime.strptime(
-                "09:30",
-                "%H:%M"
-            )
-
-            end_time = datetime.datetime.now(
-                pytz.timezone("Asia/Kolkata")
-            ).replace(second=0, microsecond=0)
-
-            current = start_time
-
-            while current <= end_time:
-
-                t = current.strftime("%H:%M")
-
-                msg += f"⏰ {t}\n"
-
-                if t in time_map:
-
-                    for s in sorted(time_map[t]):
-
-                        msg += f"• {s}\n"
-
-                else:
-
-                        msg += "❌ NO STOCK\n"
-
-                msg += "\n"
-
-                current += datetime.timedelta(minutes=15)
-
-            asyncio.run(send(msg))
 
     except Exception as e:
 
@@ -544,14 +563,12 @@ def entry():
         pytz.timezone("Asia/Kolkata")
     )
 
-    # ================= ENTRY TIME =================
-
     if not (
         datetime.time(9,45)
         <=
         now.time()
         <=
-        datetime.time(13,45)
+        datetime.time(14,0)
     ):
         return
 
@@ -560,117 +577,111 @@ def entry():
         if sym in trades:
             continue
 
-        r = active_radar[sym]
+        try:
 
-        radar_time = datetime.datetime.strptime(
-            r["time"],
-            "%H:%M"
-        ).time()
+            r = active_radar[sym]
 
-        # ================= RADAR FILTER =================
+            radar_time = datetime.datetime.strptime(
+                r["time"],
+                "%H:%M"
+            ).time()
 
-        if not (
-            datetime.time(9,30)
-            <=
-            radar_time
-            <=
-            datetime.time(13,30)
-        ):
-            continue
+            radar_dt = datetime.datetime.combine(
+                now.date(),
+                radar_time
+            )
 
-        # ================= ENTRY AFTER RADAR CANDLE =================
+            next_allowed_entry = (
+                radar_dt +
+                datetime.timedelta(minutes=15)
+            ).time()
 
-        radar_dt = datetime.datetime.combine(
-            now.date(),
-            radar_time
-        )
+            if now.time() < next_allowed_entry:
+                continue
 
-        next_allowed_entry = (
-            radar_dt +
-            datetime.timedelta(minutes=15)
-        ).time()
+            token = TOKENS[sym]
 
-        if now.time() < next_allowed_entry:
-            continue
+            df = get_candle_data(
+                token,
+                "FIVE_MINUTE"
+            )
 
-        token = TOKENS[sym]
+            if df is None:
+                continue
 
-        df = get_candle_data(
-            token,
-            "FIVE_MINUTE"
-        )
+            if len(df) < 10:
+                continue
 
-        if df is None:
-            continue
+            df = vwap(df)
 
-        if len(df) < 10:
-            continue
+            last = df.iloc[-1]
+            prev = df.iloc[-2]
 
-        df = vwap(df)
+            if (
+                last["close"] > last["vwap"]
+                and
+                prev["low"] <= prev["vwap"] * 1.002
+            ):
 
-        last = df.iloc[-1]
-        prev = df.iloc[-2]
+                sl_price = min(
+                    prev["low"],
+                    r["low"]
+                )
 
-        # ================= ENTRY CONDITION =================
-
-        if (
-            last["close"] > last["vwap"]
-            and
-            prev["low"] <= prev["vwap"] * 1.002
-        ):
-
-            trades[sym] = {
-
-                "date":
-                    now.strftime("%Y-%m-%d"),
-
-                "radar":
-                    r["time"],
-
-                "entry":
-                    now.strftime("%H:%M"),
-
-                "entry_price":
-                    last["close"],
-
-                "sl":
-                    min(
-                        prev["low"],
-                        r["low"]
-                    ),
-
-                "tgt":
+                target_price = (
                     last["close"] +
                     (
                         last["close"] -
-                        min(
-                            prev["low"],
-                            r["low"]
-                        )
-                    ),
-
-                "status":
-                    "OPEN"
-
-            }
-
-            asyncio.run(
-                send(
-                    f"🚀 ENTRY ALERT 🚀\n\n"
-
-                    f"📈 STOCK: {sym}\n"
-
-                    f"📡 RADAR: {r['time']}\n"
-
-                    f"⏰ ENTRY: {now.strftime('%H:%M')}\n"
-
-                    f"💰 PRICE: {round(last['close'], 2)}\n"
-
-                    f"🛑 STOPLOSS: {round(sl_price, 2)}\n"
-
-                    f"🎯 TARGET: {round(target_price, 2)}"
+                        sl_price
+                    )
                 )
-             )
+
+                trades[sym] = {
+
+                    "date":
+                        now.strftime("%Y-%m-%d"),
+
+                    "radar":
+                        r["time"],
+
+                    "entry":
+                        now.strftime("%H:%M"),
+
+                    "entry_price":
+                        last["close"],
+
+                    "sl":
+                        sl_price,
+
+                    "tgt":
+                        target_price,
+
+                    "status":
+                        "OPEN"
+
+                }
+
+                asyncio.run(
+                    send(
+                        f"🚀 ENTRY ALERT 🚀\n\n"
+
+                        f"📈 STOCK: {sym}\n"
+
+                        f"📡 RADAR: {r['time']}\n"
+
+                        f"⏰ ENTRY: {now.strftime('%H:%M')}\n"
+
+                        f"💰 PRICE: {round(last['close'], 2)}\n"
+
+                        f"🛑 STOPLOSS: {round(sl_price, 2)}\n"
+
+                        f"🎯 TARGET: {round(target_price, 2)}"
+                    )
+                )
+
+        except Exception as e:
+
+            print(f"❌ ENTRY {sym}:", e)
 
 # ================= RESULT =================
 
@@ -678,154 +689,108 @@ def result():
 
     for sym, t in trades.items():
 
-        if t["status"] != "OPEN":
-            continue
+        try:
 
-        token = TOKENS[sym]
+            if t["status"] != "OPEN":
+                continue
 
-        df = get_candle_data(
-            token,
-            "FIVE_MINUTE"
-        )
+            token = TOKENS[sym]
 
-        if df is None:
-            continue
+            df = get_candle_data(
+                token,
+                "FIVE_MINUTE"
+            )
 
-        last = df.iloc[-1]
+            if df is None:
+                continue
 
-        if last["low"] <= t["sl"]:
+            last = df.iloc[-1]
 
-            t["status"] = "LOSS"
+            if last["low"] <= t["sl"]:
 
-            asyncio.run(
-                send(
-                    f"❌ SL HIT\n\n"
-                    f"STOCK: {sym}"
+                t["status"] = "LOSS"
+
+                asyncio.run(
+                    send(
+                        f"❌ SL HIT\n\n"
+                        f"📈 STOCK: {sym}\n"
+                        f"🛑 SL: {round(t['sl'],2)}"
+                    )
                 )
-            )
 
-        elif last["high"] >= t["tgt"]:
+            elif last["high"] >= t["tgt"]:
 
-            t["status"] = "WIN"
+                t["status"] = "WIN"
 
-            asyncio.run(
-                send(
-                    f"🎯 TARGET HIT\n\n"
-                    f"STOCK: {sym}"
+                asyncio.run(
+                    send(
+                        f"🎯 TARGET HIT\n\n"
+                        f"📈 STOCK: {sym}\n"
+                        f"🎯 TARGET: {round(t['tgt'],2)}"
+                    )
                 )
-            )
 
-# ================= REPORT =================
+        except Exception as e:
 
-def report():
-
-    out = []
-
-    # ================= TRADES =================
-
-    if trades:
-
-        out.append("🚀 TRADES\n")
-
-        sorted_trades = sorted(
-            trades.items(),
-            key=lambda x: datetime.datetime.strptime(
-                x[1]["entry"],
-                "%H:%M"
-            )
-        )
-
-        for sym, t in sorted_trades:
-
-            out.append(
-
-f"""📊 {sym}
-
-📡 RADAR: {t['radar']}
-
-🚀 ENTRY: {t['entry']}
-
-💰 ENTRY: {round(t['entry_price'],2)}
-
-🛑 SL: {round(t['sl'],2)}
-
-🎯 TARGET: {round(t['tgt'],2)}
-
-📌 STATUS: {t['status']}
-
-━━━━━━━━━━━━━━━"""
-
-            )
-
-    # ================= RADAR WAITING =================
-
-    waiting_map = {}
-
-    for k, r in radar_history.items():
-
-        if r["symbol"] not in trades:
-
-            t = r["time"]
-
-            if t not in waiting_map:
-                waiting_map[t] = []
-
-            waiting_map[t].append(
-                r["symbol"]
-            )
-
-    if waiting_map:
-
-        out.append("\n📡 RADAR WAITING\n")
-
-        sorted_times = sorted(
-            waiting_map.keys(),
-            key=lambda x: datetime.datetime.strptime(
-                x,
-                "%H:%M"
-            )
-        )
-
-        for t in sorted_times:
-
-            out.append(f"\n⏰ {t}")
-
-            for sym in sorted(waiting_map[t]):
-
-                out.append(f"• {sym}")
-
-    # ================= EMPTY =================
-
-    if not out:
-
-        return "❌ NO SIGNALS TODAY"
-
-    return "\n".join(out)
-
-# ================= LOOP =================
+            print(f"❌ RESULT {sym}:", e)
 
 # ================= LOOP =================
 
 def loop():
 
+    ist = pytz.timezone("Asia/Kolkata")
+
+    last = None
+
     while True:
 
         try:
 
-            time.sleep(60)
+            now = datetime.datetime.now(ist)
+
+            if (
+                datetime.time(9,45)
+                <=
+                now.time()
+                <=
+                datetime.time(15,0)
+            ):
+
+                if now.minute % 5 == 0:
+
+                    key = now.strftime("%H:%M")
+
+                    if key != last:
+
+                        last = key
+
+                        print(
+                            f"🚀 LIVE CHECK {key}"
+                        )
+
+                        entry()
+
+                        result()
+
+            time.sleep(2)
 
         except Exception as e:
 
             print("❌ LOOP:", e)
 
             time.sleep(5)
+
 # ================= WEBSOCKET =================
 
 def subscribe_dynamic(sws, tokens):
 
     batch_size = 50
 
-    for i in range(0, len(tokens), batch_size):
+    for i in range(
+        0,
+        len(tokens),
+        batch_size
+    ):
 
         sws.subscribe([
             {
@@ -933,17 +898,9 @@ def webhook():
 
         print("📩 COMMAND:", text)
 
-        # ================= LIVE =================
-
-        if text == "LIVE":
-
-            msg = report()
-
-            asyncio.run(send(msg))
-
         # ================= RADAR =================
 
-        elif text == "RADAR":
+        if text == "RADAR":
 
             if scan_running:
 
@@ -966,6 +923,34 @@ def webhook():
                     )
                 )
 
+        # ================= LIVE =================
+
+        elif text == "LIVE":
+
+            if not trades:
+
+                asyncio.run(
+                    send(
+                        "❌ NO ACTIVE TRADES"
+                    )
+                )
+
+            else:
+
+                msg = "🚀 LIVE TRADES\n\n"
+
+                for sym, t in trades.items():
+
+                    msg += (
+                        f"📈 {sym}\n"
+                        f"ENTRY: {t['entry_price']}\n"
+                        f"SL: {round(t['sl'],2)}\n"
+                        f"TGT: {round(t['tgt'],2)}\n"
+                        f"STATUS: {t['status']}\n\n"
+                    )
+
+                asyncio.run(send(msg))
+
         # ================= STOP =================
 
         elif text == "STOP":
@@ -984,7 +969,22 @@ def webhook():
 
             if scan_running:
 
-                msg = "📡 SCAN RUNNING"
+                runtime = ""
+
+                if scan_started_at:
+
+                    runtime = (
+                        datetime.datetime.now(
+                            pytz.timezone("Asia/Kolkata")
+                        ) - scan_started_at
+                    )
+
+                    runtime = str(runtime).split(".")[0]
+
+                msg = (
+                    "📡 SCAN RUNNING\n\n"
+                    f"⏱ RUNTIME: {runtime}"
+                )
 
             else:
 
