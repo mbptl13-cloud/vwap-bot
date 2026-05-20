@@ -329,8 +329,6 @@ def radar():
                     .rolling(20)
                     .mean()
                 )
-                df = df.tail(10)
-
                 for i in range(len(df)):
 
                     row = df.iloc[i]
@@ -497,25 +495,38 @@ def radar():
 
                 time_map[t].append(r["symbol"])
 
-            sorted_times = sorted(
-                time_map.keys(),
-                key=lambda x: datetime.datetime.strptime(
-                    x,
-                    "%H:%M"
-                )
-            )
-
             msg = "📡 RADAR SIGNALS\n\n"
 
-            for t in sorted_times:
+            start_time = datetime.datetime.strptime(
+                "09:30",
+                "%H:%M"
+            )
+
+            end_time = datetime.datetime.now(
+                pytz.timezone("Asia/Kolkata")
+            ).replace(second=0, microsecond=0)
+
+            current = start_time
+
+            while current <= end_time:
+
+                t = current.strftime("%H:%M")
 
                 msg += f"⏰ {t}\n"
 
-                for s in sorted(time_map[t]):
+                if t in time_map:
 
-                    msg += f"• {s}\n"
+                    for s in sorted(time_map[t]):
+
+                        msg += f"• {s}\n"
+
+                else:
+
+                        msg += "❌ NO STOCK\n"
 
                 msg += "\n"
+
+                current += datetime.timedelta(minutes=15)
 
             asyncio.run(send(msg))
 
@@ -793,90 +804,21 @@ f"""📊 {sym}
 
 # ================= LOOP =================
 
+# ================= LOOP =================
+
 def loop():
-
-    ist = pytz.timezone("Asia/Kolkata")
-
-    last_radar = None
-    last_live = None
 
     while True:
 
         try:
 
-            now = datetime.datetime.now(ist)
-
-            current_key = now.strftime("%H:%M")
-
-            # =====================================
-            # RADAR SCAN
-            # RUN 3 MIN AFTER 15M CANDLE
-            # =====================================
-
-            if (
-                datetime.time(9,33)
-                <=
-                now.time()
-                <=
-                datetime.time(13,48)
-            ):
-
-                if now.minute in [3, 18, 33, 48]:
-
-                    radar_key = current_key
-
-                    if radar_key != last_radar:
-
-                        last_radar = radar_key
-
-                        if not scan_running:
-
-                            print(
-                                f"📡 AUTO RADAR {current_key}"
-                            )
-
-                            threading.Thread(
-                                target=radar,
-                                daemon=True
-                            ).start()
-
-            # =====================================
-            # ENTRY + RESULT
-            # EVERY 5 MIN
-            # =====================================
-
-            if (
-                datetime.time(9,45)
-                <=
-                now.time()
-                <=
-                datetime.time(14,0)
-            ):
-
-                if now.minute % 5 == 0:
-
-                    live_key = current_key
-
-                    if live_key != last_live:
-
-                        last_live = live_key
-
-                        print(
-                            f"🚀 LIVE SCAN {current_key}"
-                        )
-
-                        entry()
-
-                        result()
-
-            time.sleep(2)
+            time.sleep(60)
 
         except Exception as e:
 
             print("❌ LOOP:", e)
 
             time.sleep(5)
-
 # ================= WEBSOCKET =================
 
 def subscribe_dynamic(sws, tokens):
