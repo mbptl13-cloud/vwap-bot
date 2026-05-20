@@ -9,6 +9,7 @@ import os
 import requests
 import pandas as pd
 import pyotp
+import re
 
 from SmartApi import SmartConnect
 from SmartApi.smartWebSocketV2 import SmartWebSocketV2
@@ -91,6 +92,8 @@ async def send(msg):
 # ================= VWAP =================
 
 def vwap(df):
+
+    df = df.copy()
 
     df["tp"] = (
         df["high"] +
@@ -223,7 +226,12 @@ def refresh_tokens():
 
 # ================= CANDLE DATA =================
 
-def get_candle_data(token, interval):
+def get_candle_data(
+    token,
+    interval,
+    from_date=None,
+    to_date=None
+):
 
     global angel
 
@@ -233,12 +241,16 @@ def get_candle_data(token, interval):
 
         now = datetime.datetime.now(ist)
 
-        from_date = (
-            now -
-            datetime.timedelta(days=5)
-        ).strftime("%Y-%m-%d 09:15")
+        if from_date is None:
 
-        to_date = now.strftime("%Y-%m-%d %H:%M")
+            from_date = (
+                now -
+                datetime.timedelta(days=5)
+            ).strftime("%Y-%m-%d 09:15")
+
+        if to_date is None:
+
+            to_date = now.strftime("%Y-%m-%d %H:%M")
 
         params = {
             "exchange": "NSE",
@@ -301,7 +313,7 @@ def get_candle_data(token, interval):
 
         return None
 
-# ================= RADAR =================
+# ================= LIVE RADAR =================
 
 def radar():
 
@@ -360,16 +372,12 @@ def radar():
 
                     candle_time = row["time"]
 
-                    # ================= TODAY FILTER =================
-
                     today = datetime.datetime.now(
                         pytz.timezone("Asia/Kolkata")
                     ).date()
 
                     if candle_time.date() != today:
                         continue
-
-                    # ================= TIME FILTER =================
 
                     if candle_time.hour < 9:
                         continue
@@ -390,8 +398,6 @@ def radar():
                         candle_time.minute > 45
                     ):
                         continue
-
-                    # ================= ORIGINAL TIGHT CONDITIONS =================
 
                     volume_cond = (
                         row["volume"] > 500000
@@ -507,8 +513,6 @@ def radar():
 
                 print(f"❌ {sym}:", e)
 
-        # ================= MESSAGE =================
-
         time_map = {}
 
         for k, r in radar_history.items():
@@ -532,9 +536,11 @@ def radar():
         now_ist = datetime.datetime.now(
             pytz.timezone("Asia/Kolkata")
         )
+
         completed_time = now_ist - datetime.timedelta(
-                minutes=15
+            minutes=15
         )
+
         completed_time = completed_time.replace(
             minute=(completed_time.minute // 15) * 15,
             second=0,
@@ -576,6 +582,355 @@ def radar():
         scan_running = False
 
         print("❌ RADAR ERROR:", e)
+
+# ================= BACKTEST =================
+
+def backtest_scan(backtest_date):
+
+    try:
+
+        print(f"📊 BACKTEST STARTED {backtest_date}")
+
+        radar_results = {}
+        trade_results = []
+
+        for sym, token in TOKENS.items():
+
+            try:
+
+                # ================= 15 MIN DATA =================
+
+                from_date = f"{backtest_date} 09:15"
+                to_date = f"{backtest_date} 15:30"
+
+                df15 = get_candle_data(
+                    token,
+                    "FIFTEEN_MINUTE",
+                    from_date,
+                    to_date
+                )
+
+                if df15 is None:
+                    continue
+
+                if len(df15) < 20:
+                    continue
+
+                df15 = vwap(df15)
+
+                df15["vol_sma20"] = (
+                    df15["volume"]
+                    .rolling(20)
+                    .mean()
+                )
+
+                for i in range(len(df15)):
+
+                    row = df15.iloc[i]
+
+                    candle_time = row["time"]
+
+                    if candle_time.hour < 9:
+                        continue
+
+                    if (
+                        candle_time.hour == 9
+                        and
+                        candle_time.minute < 30
+                    ):
+                        continue
+
+                    if candle_time.hour > 13:
+                        continue
+
+                    if (
+                        candle_time.hour == 13
+                        and
+                        candle_time.minute > 45
+                    ):
+                        continue
+
+                    volume_cond = (
+                        row["volume"] > 500000
+                    )
+
+                    turnover_cond = (
+                        (
+                            row["close"] *
+                            row["volume"]
+                        ) > 15000000
+                    )
+
+                    range_percent = (
+                        (
+                            (
+                                row["high"] -
+                                row["low"]
+                            ) /
+                            row["open"]
+                        ) * 100
+                    )
+
+                    range_cond = (
+                        range_percent > 1
+                    )
+
+                    body_percent = (
+                        (
+                            abs(
+                                row["close"] -
+                                row["open"]
+                            ) /
+                            row["open"]
+                        ) * 100
+                    )
+
+                    body_cond = (
+                        body_percent > 0.6
+                    )
+
+                    vwap_cond = (
+                        row["close"] >
+                        row["vwap"]
+                    )
+
+                    volume_blast_cond = (
+                        row["volume"] >
+                        (
+                            row["vol_sma20"] * 2
+                        )
+                    )
+
+                    bullish_cond = (
+                        row["close"] >
+                        row["open"]
+                    )
+
+                    if not (
+
+                        volume_cond
+                        and
+                        turnover_cond
+                        and
+                        range_cond
+                        and
+                        body_cond
+                        and
+                        vwap_cond
+                        and
+                        volume_blast_cond
+                        and
+                        bullish_cond
+
+                    ):
+
+                        continue
+
+                    radar_time = candle_time.strftime("%H:%M")
+
+                    radar_key = (
+                        sym + "_" + radar_time
+                    )
+
+                    if radar_key in radar_results:
+                        continue
+
+                    radar_results[radar_key] = {
+
+                        "symbol": sym,
+                        "time": radar_time
+
+                    }
+
+                    # ================= 5 MIN ENTRY =================
+
+                    df5 = get_candle_data(
+                        token,
+                        "FIVE_MINUTE",
+                        from_date,
+                        to_date
+                    )
+
+                    if df5 is None:
+                        continue
+
+                    if len(df5) < 10:
+                        continue
+
+                    df5 = vwap(df5)
+
+                    radar_dt = candle_time
+
+                    entry_found = False
+
+                    for j in range(len(df5)):
+
+                        last = df5.iloc[j]
+
+                        if j < 1:
+                            continue
+
+                        prev = df5.iloc[j - 1]
+
+                        candle_5_time = last["time"]
+
+                        if candle_5_time <= radar_dt:
+                            continue
+
+                        distance_from_vwap = (
+                            (
+                                last["close"] -
+                                last["vwap"]
+                            ) /
+                            last["vwap"]
+                        ) * 100
+
+                        if (
+
+                            last["close"] > last["vwap"]
+
+                            and
+
+                            prev["low"] <= prev["vwap"] * 1.001
+
+                            and
+
+                            distance_from_vwap <= 0.3
+
+                        ):
+
+                            entry_price = last["close"]
+
+                            sl_price = (
+                                last["vwap"] * 0.997
+                            )
+
+                            risk = (
+                                entry_price -
+                                sl_price
+                            )
+
+                            target_price = (
+                                entry_price +
+                                (risk * 2)
+                            )
+
+                            result_status = "OPEN"
+
+                            result_time = ""
+
+                            # ================= CHECK RESULT =================
+
+                            future_df = df5[
+                                df5["time"] >
+                                candle_5_time
+                            ]
+
+                            for _, frow in future_df.iterrows():
+
+                                if frow["low"] <= sl_price:
+
+                                    result_status = "LOSS"
+
+                                    result_time = (
+                                        frow["time"]
+                                        .strftime("%H:%M")
+                                    )
+
+                                    break
+
+                                elif frow["high"] >= target_price:
+
+                                    result_status = "WIN"
+
+                                    result_time = (
+                                        frow["time"]
+                                        .strftime("%H:%M")
+                                    )
+
+                                    break
+
+                            trade_results.append({
+
+                                "symbol": sym,
+                                "radar": radar_time,
+                                "entry": candle_5_time.strftime("%H:%M"),
+                                "entry_price": round(entry_price, 2),
+                                "sl": round(sl_price, 2),
+                                "target": round(target_price, 2),
+                                "result": result_status,
+                                "exit_time": result_time
+
+                            })
+
+                            entry_found = True
+                            break
+
+                    if entry_found:
+                        break
+
+            except Exception as e:
+
+                print(f"❌ BACKTEST {sym}:", e)
+
+        # ================= REPORT =================
+
+        msg = f"📊 BACKTEST REPORT {backtest_date}\n\n"
+
+        if not trade_results:
+
+            msg += "❌ NO TRADE FOUND"
+
+            asyncio.run(send(msg))
+            return
+
+        win = 0
+        loss = 0
+
+        for t in trade_results:
+
+            if t["result"] == "WIN":
+                win += 1
+
+            elif t["result"] == "LOSS":
+                loss += 1
+
+            msg += (
+                f"📈 {t['symbol']}\n"
+                f"📡 RADAR: {t['radar']}\n"
+                f"⏰ ENTRY: {t['entry']}\n"
+                f"💰 PRICE: {t['entry_price']}\n"
+                f"🛑 SL: {t['sl']}\n"
+                f"🎯 TGT: {t['target']}\n"
+                f"🏁 RESULT: {t['result']}\n"
+            )
+
+            if t["exit_time"]:
+                msg += (
+                    f"⌛ EXIT: {t['exit_time']}\n"
+                )
+
+            msg += "\n"
+
+        total = len(trade_results)
+
+        accuracy = round(
+            (win / total) * 100,
+            2
+        )
+
+        msg += (
+            f"✅ TOTAL: {total}\n"
+            f"🎯 WIN: {win}\n"
+            f"❌ LOSS: {loss}\n"
+            f"📊 ACCURACY: {accuracy}%"
+        )
+
+        asyncio.run(send(msg))
+
+    except Exception as e:
+
+        print("❌ BACKTEST ERROR:", e)
 
 # ================= ENTRY =================
 
@@ -639,8 +994,6 @@ def entry():
             last = df.iloc[-1]
             prev = df.iloc[-2]
 
-            # ================= ENTRY NEAR VWAP =================
-
             distance_from_vwap = (
                 (
                     last["close"] -
@@ -663,8 +1016,6 @@ def entry():
 
             ):
 
-                # ================= VWAP SL =================
-
                 sl_price = (
                     last["vwap"] * 0.997
                 )
@@ -673,8 +1024,6 @@ def entry():
                     last["close"] -
                     sl_price
                 )
-
-                # ================= 1:2 TARGET =================
 
                 target_price = (
                     last["close"] +
@@ -951,6 +1300,8 @@ def webhook():
 
         print("📩 COMMAND:", text)
 
+        # ================= RADAR =================
+
         if text == "RADAR":
 
             if scan_running:
@@ -973,6 +1324,26 @@ def webhook():
                         "📡 RADAR SCAN STARTED"
                     )
                 )
+
+        # ================= BACKTEST =================
+
+        elif re.match(r"^\d{4}-\d{2}-\d{2}$", text):
+
+            backtest_date = text
+
+            threading.Thread(
+                target=backtest_scan,
+                args=(backtest_date,),
+                daemon=True
+            ).start()
+
+            asyncio.run(
+                send(
+                    f"📊 BACKTEST STARTED {backtest_date}"
+                )
+            )
+
+        # ================= LIVE =================
 
         elif text == "LIVE":
 
@@ -1000,6 +1371,8 @@ def webhook():
 
                 asyncio.run(send(msg))
 
+        # ================= STOP =================
+
         elif text == "STOP":
 
             scan_running = False
@@ -1009,6 +1382,8 @@ def webhook():
                     "🛑 STOP COMMAND RECEIVED"
                 )
             )
+
+        # ================= STATUS =================
 
         elif text == "STATUS":
 
@@ -1037,6 +1412,8 @@ def webhook():
 
             asyncio.run(send(msg))
 
+        # ================= HELP =================
+
         else:
 
             asyncio.run(
@@ -1045,7 +1422,9 @@ def webhook():
                     "RADAR\n"
                     "LIVE\n"
                     "STOP\n"
-                    "STATUS"
+                    "STATUS\n\n"
+                    "BACKTEST:\n"
+                    "2026-05-19"
                 )
             )
 
