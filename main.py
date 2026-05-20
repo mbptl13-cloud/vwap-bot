@@ -532,10 +532,18 @@ def radar():
         now_ist = datetime.datetime.now(
             pytz.timezone("Asia/Kolkata")
         )
+        completed_time = now_ist - datetime.timedelta(
+                minutes=15
+        )
+        completed_time = completed_time.replace(
+            minute=(completed_time.minute // 15) * 15,
+            second=0,
+            microsecond=0
+        )
 
         current = start_time
 
-        while current.time() <= now_ist.time():
+        while current.time() <= completed_time.time():
 
             t = current.strftime("%H:%M")
 
@@ -808,6 +816,12 @@ def loop():
                         )
 
                         entry()
+
+                        asyncio.run(
+                            send(
+                                f"✅ ENTRY CHECKED {key}"
+                            )
+                        )
 
                         result()
 
