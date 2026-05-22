@@ -1069,6 +1069,11 @@ if __name__ == "__main__":
         TOKENS, TOKEN_MAP = get_fno_tokens()
 
         threading.Thread(
+            target=daily_reset,
+            daemon=True
+        ).start()
+
+        threading.Thread(
             target=socket,
             daemon=True
         ).start()
