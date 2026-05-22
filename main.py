@@ -650,28 +650,46 @@ def entry(chat_id):
 
                 trades[sym] = {
 
+                    "entry_time":
+                        last["time"].strftime("%H:%M"),
+                
                     "entry_price":
                         last["close"],
-
+                
                     "sl":
                         sl_price,
-
+                
                     "tgt":
                         target_price,
-
+                
                     "status":
                         "OPEN"
-
+                
                 }
-
+                
                 asyncio.run(
                     send(
                         chat_id,
                         f"🚀 ENTRY ALERT 🚀\n\n"
+                
                         f"📈 STOCK: {sym}\n"
-                        f"💰 PRICE: {round(last['close'], 2)}\n"
-                        f"🛑 SL: {round(sl_price, 2)}\n"
-                        f"🎯 TARGET: {round(target_price, 2)}"
+                
+                        f"📡 RADAR: {r['time']}\n"
+                
+                        f"⏰ ENTRY CANDLE: "
+                        f"{last['time'].strftime('%H:%M')}\n\n"
+                
+                        f"💰 PRICE: "
+                        f"{round(last['close'], 2)}\n"
+                
+                        f"📊 VWAP: "
+                        f"{round(last['vwap'], 2)}\n"
+                
+                        f"🛑 SL: "
+                        f"{round(sl_price, 2)}\n"
+                
+                        f"🎯 TARGET: "
+                        f"{round(target_price, 2)}"
                     )
                 )
 
