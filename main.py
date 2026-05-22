@@ -324,9 +324,6 @@ def radar(chat_id):
             pytz.timezone("Asia/Kolkata")
         )
 
-        radar_history = {}
-        active_radar = {}
-
         print("📡 RUNNING RADAR...")
 
         for sym, token in TOKENS.items():
@@ -733,6 +730,36 @@ def result(chat_id):
 
             print(f"❌ RESULT {sym}:", e)
 
+# ================= DAILY RESET =================
+def daily_reset():
+
+    global radar_history
+    global active_radar
+    global trades
+
+    ist = pytz.timezone("Asia/Kolkata")
+
+    while True:
+
+        try:
+
+            now = datetime.datetime.now(ist)
+
+            if now.hour == 8 and now.minute == 55:
+
+                radar_history.clear()
+                active_radar.clear()
+                trades.clear()
+
+                print("🔄 DAILY RESET DONE")
+
+                time.sleep(60)
+
+            time.sleep(20)
+
+        except Exception as e:
+
+            print("❌ RESET:", e)
 # ================= LOOP =================
 
 def loop():
